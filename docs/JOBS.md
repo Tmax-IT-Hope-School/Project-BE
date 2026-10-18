@@ -146,16 +146,56 @@ URL 은 `https://project-be-mxxc.onrender.com/api/v1/jobs/<작업 이름>` 입�
 | `call-ring` | **5분마다** | 지금 | 정해 둔 시각에 전화 알림 | `[전화 알림] 울림 n명` | 6-5 |
 | `habit-nudge` | 매일 19:00 | 지금 | "오늘의 작전" 알림 | `[오늘의 작전] 보냄 n명 · 건너뜀 n명` | 6-4 |
 | `risk-confirm` | 매일 05:00 | 지금 | 지난 위험 예측이 맞았는지 채우기 | `[위험 예측 확인] 맞았는지 채움 n개` | 6-6 |
-| `school-events` | 매일 05:00 | 지금 (이슈 #289) | 학교 학사일정 새로 받기 | `[학사일정] 학교 n곳 중 n곳의 일정이 최신이에요.` | 6-7 |
-| `weekly-goals` | **매주 월요일** 05:00 | **PR #328 이 main 에 배포된 뒤** | 지난주 "이번 주 목표" 판정 | `[주 목표 판정] n개` | 6-8 (#328) |
-| `care-stages` | 매일 04:10 | **PR #331 이 main 에 배포된 뒤** | 모든 학생의 오늘 관리 단계 정하기 | `[관리 단계] 판정 n명` | 6-9 (#331) |
-| `school-daily` | 매일 05:00 (학교가 많아지면 05:00 ~ 06:00 10분마다) | **feat/school-daily-crawl 이 main 에 배포된 뒤** | 학교마다 학사일정 · 급식 미리 받기 + 홈페이지 가정통신문 · 공지 제목 읽기 (`school-events` 일도 같이 함) | `[학교 하루 작업] 학교 n곳 중 n곳을 처리했어요. …` | 6-10 |
+| `school-events` | 매일 05:00 | 지금 (이슈 #289). `school-daily` 를 만들면 **안 만들어도 됩니다** | 학교 학사일정 새로 받기 | `[학사일정] 학교 n곳 중 n곳의 일정이 최신이에요.` | 6-7 |
+| `weekly-goals` | **매주 월요일** 05:00 | **main 배포(#343)가 끝난 뒤** | 지난주 "이번 주 목표" 판정 | `[주 목표 판정] n개` | 6-8 (#328) |
+| `care-stages` | 매일 04:10 | **main 배포(#343)가 끝난 뒤** | 모든 학생의 오늘 관리 단계 정하기 | `[관리 단계] 판정 n명` | 6-9 (#331) |
+| `school-daily` | 매일 05:00 (학교가 많아지면 05:00 ~ 06:00 10분마다) | **main 배포(#343)가 끝난 뒤** | 학교마다 학사일정 · 급식 미리 받기 + 홈페이지 가정통신문 · 공지 제목 읽기 (`school-events` 일도 같이 함) | `[학교 하루 작업] 학교 n곳 중 n곳을 처리했어요. …` | 6-10 |
 
 - **배포되기 전의 작업을 부르면 404 "그런 작업이 없어요"** 입니다. 실패가 계속 쌓이면 cron-job.org 가 알람을 꺼 버리므로(연속 25회), 표의 "언제 만드나" 가 지난 뒤에 만듭니다.
 - 하루가 바뀌는 때가 **새벽 4시**라서, "어제" 를 보는 작업은 4시 뒤(04:10 · 05:00)에 둡니다.
 - `call-ring` 이 5분마다 서버를 깨우므로, 이것 하나만 켜 두어도 서버가 잠들지 않습니다. (무료 시간 이야기는 7번)
 - **누가 · 언제 무엇을 만들었는지는 이 문서로 알 수 없습니다.** (Claude 는 cron-job.org 를 볼 수 없습니다) 만든 사람은 이슈 #289 같은 등록 이슈에 남겨 주세요.
 - 만든 뒤 확인: cron-job.org 실행 기록의 응답이 `200` 인지, Render **Logs** 에 위 표의 줄이 그 시각에 찍히는지 봅니다. 키가 틀리면 `401` 입니다.
+- **배포가 끝났는지** 는 그 배포로 새로 생긴 일반 주소를 키 없이 불러 봅니다. 예: `curl -i https://project-be-mxxc.onrender.com/api/v1/experiments` 가 `401`(로그인 필요)이면 새 서버, `404` 면 아직 예전 서버입니다.
+  - ⚠️ `/api/v1/jobs/…` 로는 알 수 없습니다. 작업 주소는 **키 검사가 먼저**라서, 키 없이 부르면 없는 작업도 `401` 입니다.
+
+#### 화면에서 만드는 순서
+
+> cron-job.org 화면은 Claude 가 직접 보지 못하고 일반적인 모양으로 적었습니다. 칸 이름이 다르면 "URL · 주기 · POST · 헤더 `X-Job-Key` · `Asia/Seoul`" 만 맞추면 됩니다. 직접 해 보고 다른 점은 여기에 고쳐 주세요.
+
+0. **키 준비**: Render 대시보드 → 서비스 `project-be` → **Environment** → `JOB_SECRET_KEY` 값을 복사합니다. 칸이 없으면 위 [키 만들기](#키-만들기)로 만들어 먼저 넣습니다. (6-1)
+1. cron-job.org 로그인 → **Cronjobs** → **CREATE CRONJOB**
+2. **COMMON** 탭
+
+   | 칸 | 넣을 값 |
+   | -- | -- |
+   | Title | 작업 이름 (예: `call-ring`) |
+   | URL | `https://project-be-mxxc.onrender.com/api/v1/jobs/<작업 이름>` |
+   | Enable job | 켬 |
+   | Execution schedule | 위 표의 주기. "N분마다" 는 Every N minutes, "매일 몇 시" 는 Every day at 시 · 분. 없으면 **Custom** 에서 Days of month · Days of week 전부, Hours · Minutes 지정 (매주 월요일은 Days of week 를 월요일만) |
+   | Notifications | "execution fails" 체크 (실패하면 메일) |
+
+3. **ADVANCED** 탭
+
+   | 칸 | 넣을 값 |
+   | -- | -- |
+   | Time zone | `Asia/Seoul` (UTC 로 두면 9시간 어긋납니다) |
+   | Request method | **POST** (기본값이 GET 이라 꼭 바꿉니다) |
+   | Headers | **ADD** → Key `X-Job-Key`, Value = 0번의 키 |
+
+4. **CREATE** (또는 SAVE)
+
+**시험 실행(TEST RUN)은 `school-events` · `risk-confirm` 으로만** 해 봅니다. 여러 번 돌아도 결과가 같은 작업입니다.
+`habit-nudge` 는 누르는 순간 학생들에게 "오늘의 작전" 알림이 **실제로** 가고, `call-ring` 도 그 시각 전화가 잡힌 학생에게 알림이 갑니다.
+
+| 시험 실행 응답 | 뜻 |
+| -- | -- |
+| `200` | 성공 |
+| `401` | 헤더의 키가 틀림 (앞뒤 공백 · 다른 서비스의 키) |
+| `404` | 아직 배포 전인 작업, 또는 URL 의 작업 이름 오타 |
+| `405` | Request method 가 GET 으로 남아 있음 |
+
+**왜 Claude 가 대신 만들지 않나요?** cron-job.org 에는 REST API 가 있지만, 쓰려면 cron-job.org API 키와 `JOB_SECRET_KEY` 를 Claude 에게 줘야 합니다. 비밀값은 Claude 에게 주지 않는 규칙이라(CLAUDE.md 3장) 사람이 화면에서 만듭니다. (cron-job.org 용 MCP 도 연결돼 있지 않습니다)
 
 ### 6-1. Render 에 키 넣기
 
