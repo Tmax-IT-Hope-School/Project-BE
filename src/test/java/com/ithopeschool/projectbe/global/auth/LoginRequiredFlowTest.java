@@ -564,8 +564,12 @@ class LoginRequiredFlowTest {
           "GET /api/v1/schools/{schoolCode}/majors");
 
   // 로그인 토큰이 아니라 "작업 키"(X-Job-Key)로 지키는 API 입니다. 사람이 아니라 예약 작업이 부릅니다.
-  // 키가 없으면 401 인 것은 JobFlowTest 가 확인합니다.
-  private static final List<String> JOB_KEY_REQUIRED = List.of("POST /api/v1/jobs/{name}");
+  // 키가 없으면 401 인 것은 JobFlowTest · DailySummaryControllerTest 가 확인합니다.
+  private static final List<String> JOB_KEY_REQUIRED =
+      List.of(
+          "POST /api/v1/jobs/{name}",
+          // 지난 날짜의 하루 요약 다시 만들기 (이슈 #34). 사람이 부르지만 학생이 아니라 관리하는 사람이라 작업 키로 지킵니다.
+          "POST /api/v1/jobs/daily-summary/rebuild");
 
   @Autowired private MockMvc mockMvc;
 
