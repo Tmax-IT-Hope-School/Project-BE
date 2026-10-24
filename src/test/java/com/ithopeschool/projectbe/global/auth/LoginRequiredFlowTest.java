@@ -570,7 +570,26 @@ class LoginRequiredFlowTest {
                   + "\"dailyMinutes\":60,\"startTime\":\"19:00\","
                   + "\"topics\":[{\"title\":\"수학\",\"minutes\":60}]},\"request\":\"줄여 줘\"}"),
           // 코치 알림 문장 (그날 아침 · 밤 알림 문장을 미리 받습니다. 2026-10-18)
-          new Api("POST", "/api/v1/ai/nudges", "/api/v1/ai/nudges", "{\"date\":\"2099-01-01\"}"));
+          new Api("POST", "/api/v1/ai/nudges", "/api/v1/ai/nudges", "{\"date\":\"2099-01-01\"}"),
+          // 변형 문제 (오답 변형 · 월간 심화, docs/VARIANT-SPEC.md 7장)
+          new Api(
+              "POST",
+              "/api/v1/variant/source-problems",
+              "/api/v1/variant/source-problems",
+              "{\"problemText\":\"문제\",\"isCorrect\":false,\"solvedAt\":1792841400000}"),
+          new Api(
+              "PATCH",
+              "/api/v1/variant/source-problems/{id}/classification",
+              "/api/v1/variant/source-problems/1/classification",
+              "{\"unitCode\":\"CM1-U05\",\"typeCode\":\"CM1-U05-T03\"}"),
+          new Api("GET", "/api/v1/variant/daily", "/api/v1/variant/daily", null),
+          new Api(
+              "POST",
+              "/api/v1/variant/assignments/{id}/attempts",
+              "/api/v1/variant/assignments/1/attempts",
+              "{\"answer\":\"0\"}"),
+          new Api("GET", "/api/v1/variant/weekly", "/api/v1/variant/weekly?week=2026-10-19", null),
+          new Api("GET", "/api/v1/variant/review-items", "/api/v1/variant/review-items", null));
 
   // 토큰 없이 불러도 되는 API 들입니다. 로그인하기 전에 써야 하는 것뿐입니다.
   // 구글로 시작하기 · 구글로 가입하기(이슈 #19)도 로그인하기 전에 부릅니다. 대신 구글 확인 정보가 있어야 합니다.
