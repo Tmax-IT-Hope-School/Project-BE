@@ -135,9 +135,9 @@ class SettingsFlowTest {
         .andExpect(jsonPath("$.dailyCount").value(3))
         .andExpect(jsonPath("$.quietStart").value("23:00"))
         .andExpect(jsonPath("$.quietEnd").value("07:00"))
-        .andExpect(jsonPath("$.maxHarshness").value(3))
+        .andExpect(jsonPath("$.maxHarshness").value(2))
         .andExpect(jsonPath("$.allowFocusMode").value(false))
-        .andExpect(jsonPath("$.maxCareLevel").value(2))
+        .andExpect(jsonPath("$.maxCareLevel").value(3))
         .andExpect(jsonPath("$.pendingMaxCareLevel").isEmpty())
         .andExpect(jsonPath("$.lockApps.length()").value(0));
 
@@ -145,21 +145,27 @@ class SettingsFlowTest {
     send(
             patch("/api/v1/settings"),
             tokenA,
-            "{\"maxHarshness\":5,\"quietStart\":\"22:30\",\"allowFocusMode\":true,"
+            "{\"maxHarshness\":1,\"quietStart\":\"22:30\",\"allowFocusMode\":true,"
                 + "\"lockApps\":[\"유튜브\",\"게임\"]}")
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.maxHarshness").value(5))
+        .andExpect(jsonPath("$.maxHarshness").value(1))
         .andExpect(jsonPath("$.quietStart").value("22:30"))
         .andExpect(jsonPath("$.quietEnd").value("07:00"))
         .andExpect(jsonPath("$.allowFocusMode").value(true))
         .andExpect(jsonPath("$.lockApps[0]").value("유튜브"))
-        .andExpect(jsonPath("$.lockApps[1]").value("게임"));
+        .andExpect(jsonPath("$.lockApps[1]").value("게임"))
+        // 보낸 칸은 "내가 정함" 으로 잠기고, 안 보낸 칸은 근거가 비어 있다 (#227)
+        .andExpect(jsonPath("$.sources.maxHarshness.source").value("USER"))
+        .andExpect(jsonPath("$.sources.maxHarshness.reason").value("내가 정했어요"))
+        .andExpect(jsonPath("$.sources.maxHarshness.locked").value(true))
+        .andExpect(jsonPath("$.sources.callTime.source").isEmpty())
+        .andExpect(jsonPath("$.sources.callTime.locked").value(false));
 
-    // 한도 올리기: 오늘은 2 그대로, 내일부터 4
+    // 한도 올리기: 오늘은 3 그대로, 내일부터 4
     String tomorrow = DayRule.dateOf(Instant.now()).plusDays(1).toString();
     send(patch("/api/v1/settings"), tokenA, "{\"maxCareLevel\":4}")
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.maxCareLevel").value(2))
+        .andExpect(jsonPath("$.maxCareLevel").value(3))
         .andExpect(jsonPath("$.pendingMaxCareLevel").value(4))
         .andExpect(jsonPath("$.pendingEffectiveDate").value(tomorrow));
 
@@ -192,7 +198,7 @@ class SettingsFlowTest {
           .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"));
     }
     send(get("/api/v1/settings"), tokenA, null)
-        .andExpect(jsonPath("$.maxHarshness").value(5))
+        .andExpect(jsonPath("$.maxHarshness").value(1))
         .andExpect(jsonPath("$.lockApps[0]").value("게임"));
 
     // 바꾼 기록: 언제 · 무엇을 · 전 값 · 새 값 (틀린 요청은 기록되지 않음)
@@ -200,34 +206,38 @@ class SettingsFlowTest {
         .extracting(SettingChange::getField, SettingChange::getOldValue, SettingChange::getNewValue)
         .containsExactly(
             tuple("quietStart", "23:00", "22:30"),
-            tuple("maxHarshness", "3", "5"),
+            tuple("maxHarshness", "2", "1"),
             tuple("allowFocusMode", "false", "true"),
             tuple("lockApps", "", "유튜브, 게임"),
-            tuple("maxCareLevel", "2", "4"),
+            tuple("maxCareLevel", "3", "4"),
             tuple("maxCareLevel", "4", "1"),
             tuple("lockApps", "유튜브, 게임", "게임"));
     assertThat(settingChangeRepository.findByUserIdOrderById(userIdA))
-        .allSatisfy(change -> assertThat(change.getChangedAt()).isNotNull());
+        .allSatisfy(
+            change -> {
+              assertThat(change.getChangedAt()).isNotNull();
+              assertThat(change.getSource()).isEqualTo(ChangeSource.USER);
+            });
   }
 
   @Test
   @DisplayName("남의 설정은 보이지도, 바뀌지도 않는다")
   void othersSettingsAreSeparate() throws Exception {
-    send(patch("/api/v1/settings"), tokenA, "{\"maxHarshness\":5,\"lockApps\":[\"유튜브\"]}")
+    send(patch("/api/v1/settings"), tokenA, "{\"maxHarshness\":1,\"lockApps\":[\"유튜브\"]}")
         .andExpect(status().isOk());
 
     // 비이는 여전히 처음 값이고, 에이의 앱이 보이지 않습니다.
     send(get("/api/v1/settings"), tokenB, null)
-        .andExpect(jsonPath("$.maxHarshness").value(3))
+        .andExpect(jsonPath("$.maxHarshness").value(2))
         .andExpect(jsonPath("$.lockApps.length()").value(0));
 
     // 비이가 같은 앱을 넣어도 됩니다. (같은 앱 금지는 사람마다)
-    send(patch("/api/v1/settings"), tokenB, "{\"maxHarshness\":1,\"lockApps\":[\"유튜브\"]}")
+    send(patch("/api/v1/settings"), tokenB, "{\"maxHarshness\":4,\"lockApps\":[\"유튜브\"]}")
         .andExpect(status().isOk());
 
     // 에이는 그대로입니다.
     send(get("/api/v1/settings"), tokenA, null)
-        .andExpect(jsonPath("$.maxHarshness").value(5))
+        .andExpect(jsonPath("$.maxHarshness").value(1))
         .andExpect(jsonPath("$.lockApps.length()").value(1));
     assertThat(settingChangeRepository.findByUserIdOrderById(userIdB))
         .extracting(SettingChange::getField)

@@ -28,7 +28,9 @@ public class SettingsController {
     return settingsService.getSettings();
   }
 
-  @Operation(summary = "관리 설정 바꾸기 (바꿀 칸만 보냄 · 제재 한도는 낮추면 즉시, 높이면 다음 날부터 · 바꾼 기록이 남음 · 토큰 필요)")
+  @Operation(
+      summary =
+          "관리 설정 바꾸기 (바꿀 칸만 보냄 · 보낸 칸은 '내가 정함'으로 잠김 · 제재 한도·말투 수위는 낮추면 즉시, 높이면 다음 날부터 · 바꾼 기록이 남음 · 토큰 필요)")
   @PatchMapping
   public SettingsResponse update(@Valid @RequestBody SettingsUpdateRequest request) {
     return settingsService.update(request);

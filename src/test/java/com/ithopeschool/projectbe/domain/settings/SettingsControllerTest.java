@@ -16,6 +16,7 @@ import com.ithopeschool.projectbe.global.exception.ApiException;
 import com.ithopeschool.projectbe.global.exception.ErrorCode;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -39,7 +40,8 @@ class SettingsControllerTest {
 
   // 처음 값 그대로인 설정
   private static final SettingsResponse DEFAULTS =
-      new SettingsResponse("21:00", 3, "23:00", "07:00", 3, false, 2, null, null, List.of());
+      new SettingsResponse(
+          "21:00", 3, "23:00", "07:00", 3, false, 2, null, null, List.of(), null, null, Map.of());
 
   private ResultActions sendPatch(String body) throws Exception {
     return mockMvc.perform(
@@ -57,7 +59,7 @@ class SettingsControllerTest {
   // ---- 보기 ----
 
   @Test
-  @DisplayName("보기는 200 이고, FE 의 이름으로 열 칸이 있다")
+  @DisplayName("보기는 200 이고, FE 의 이름으로 원래 열 칸 + #227 에서 더한 세 칸이 있다")
   void getSettings() throws Exception {
     given(settingsService.getSettings())
         .willReturn(
@@ -71,7 +73,12 @@ class SettingsControllerTest {
                 2,
                 4,
                 LocalDate.of(2026, 10, 18),
-                List.of("유튜브", "인스타그램")));
+                List.of("유튜브", "인스타그램"),
+                5,
+                LocalDate.of(2026, 10, 18),
+                Map.of(
+                    "dailyCount",
+                    new SettingsResponse.SourceInfo(ChangeSource.USER, "내가 정했어요", true))));
 
     mockMvc
         .perform(get("/api/v1/settings"))
@@ -87,7 +94,12 @@ class SettingsControllerTest {
         .andExpect(jsonPath("$.pendingEffectiveDate").value("2026-10-18"))
         .andExpect(jsonPath("$.lockApps[0]").value("유튜브"))
         .andExpect(jsonPath("$.lockApps[1]").value("인스타그램"))
-        .andExpect(jsonPath("$.length()").value(10))
+        .andExpect(jsonPath("$.pendingMaxHarshness").value(5))
+        .andExpect(jsonPath("$.pendingHarshnessEffectiveDate").value("2026-10-18"))
+        .andExpect(jsonPath("$.sources.dailyCount.source").value("USER"))
+        .andExpect(jsonPath("$.sources.dailyCount.reason").value("내가 정했어요"))
+        .andExpect(jsonPath("$.sources.dailyCount.locked").value(true))
+        .andExpect(jsonPath("$.length()").value(13))
         .andExpect(jsonPath("$.userId").doesNotExist());
   }
 

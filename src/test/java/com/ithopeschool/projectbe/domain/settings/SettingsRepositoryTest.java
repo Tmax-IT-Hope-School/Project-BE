@@ -13,13 +13,15 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.jpa.test.autoconfigure.TestEntityManager;
 
-// 관리 설정 테이블 3개가 진짜 DB(H2)에서 "내 것만" 찾는지, 그리고 DB 가 규칙(한 명에 한 줄 · 같은 앱 한 번 · 값의 범위)을 막는지 확인합니다.
+// 관리 설정 테이블 4개가 진짜 DB(H2)에서 "내 것만" 찾는지, 그리고 DB 가 규칙(한 명에 한 줄 · 같은 앱 한 번 · 같은 칸 근거 한 줄 · 값의 범위)을 막는지
+// 확인합니다.
 @DataJpaTest
 class SettingsRepositoryTest {
 
   @Autowired private CareSettingRepository careSettingRepository;
   @Autowired private FocusLockAppRepository focusLockAppRepository;
   @Autowired private SettingChangeRepository settingChangeRepository;
+  @Autowired private SettingSourceRepository settingSourceRepository;
   @Autowired private TestEntityManager em;
 
   // ---- 관리 설정 ----
@@ -67,7 +69,7 @@ class SettingsRepositoryTest {
   @DisplayName("독설 수위가 1~5 밖이면 DB 가 한 번 더 막는다")
   void harshnessRange() {
     CareSetting setting = CareSetting.withDefaults(1L);
-    setting.changeMaxHarshness(6);
+    setting.changeMaxHarshness(0, LocalDate.of(2026, 10, 17));
 
     assertThatThrownBy(() -> em.persistAndFlush(setting)).isInstanceOf(PersistenceException.class);
   }
@@ -126,13 +128,46 @@ class SettingsRepositoryTest {
   @DisplayName("내 기록만, 바꾼 순서대로 나온다")
   void findChanges() {
     Instant now = Instant.parse("2026-10-17T12:00:00Z");
-    em.persistAndFlush(new SettingChange(1L, now, "maxHarshness", "3", "5"));
-    em.persistAndFlush(new SettingChange(2L, now, "dailyCount", "3", "0"));
-    em.persistAndFlush(new SettingChange(1L, now, "quietStart", "23:00", "22:00"));
+    em.persistAndFlush(new SettingChange(1L, now, "maxHarshness", "3", "5", ChangeSource.USER));
+    em.persistAndFlush(new SettingChange(2L, now, "dailyCount", "3", "0", ChangeSource.USER));
+    em.persistAndFlush(
+        new SettingChange(1L, now, "quietStart", "23:00", "22:00", ChangeSource.DATA));
     em.clear();
 
     assertThat(settingChangeRepository.findByUserIdOrderById(1L))
         .extracting(SettingChange::getField)
         .containsExactly("maxHarshness", "quietStart");
+  }
+
+  // ---- 설정 근거 (#227) ----
+
+  @Test
+  @DisplayName("내 근거만 나오고, 누가 정했는지 · 이유 · 잠금이 그대로 저장된다")
+  void findSources() {
+    em.persistAndFlush(new SettingSource(1L, "dailyCount", ChangeSource.USER, "내가 정했어요", true));
+    em.persistAndFlush(
+        new SettingSource(2L, "dailyCount", ChangeSource.TEST, "검사 결과로 정했어요", false));
+    em.clear();
+
+    assertThat(settingSourceRepository.findByUserId(1L))
+        .singleElement()
+        .satisfies(
+            source -> {
+              assertThat(source.getSource()).isEqualTo(ChangeSource.USER);
+              assertThat(source.getReason()).isEqualTo("내가 정했어요");
+              assertThat(source.isLocked()).isTrue();
+            });
+  }
+
+  @Test
+  @DisplayName("한 사람의 같은 칸에 근거를 두 줄 넣으면 DB 가 막는다")
+  void oneSourcePerField() {
+    em.persistAndFlush(new SettingSource(1L, "dailyCount", ChangeSource.TEST, "검사", false));
+
+    assertThatThrownBy(
+            () ->
+                em.persistAndFlush(
+                    new SettingSource(1L, "dailyCount", ChangeSource.USER, "내가 정했어요", true)))
+        .isInstanceOf(PersistenceException.class);
   }
 }

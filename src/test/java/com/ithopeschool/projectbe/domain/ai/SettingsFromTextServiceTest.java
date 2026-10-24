@@ -16,6 +16,7 @@ import com.ithopeschool.projectbe.domain.settings.SettingsService;
 import com.ithopeschool.projectbe.domain.settings.dto.SettingsResponse;
 import com.ithopeschool.projectbe.global.auth.CurrentUserProvider;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -40,7 +41,19 @@ class SettingsFromTextServiceTest {
     given(settingsService.getSettings())
         .willReturn(
             new SettingsResponse(
-                "21:00", 3, "23:00", "07:00", 3, false, 2, null, null, List.of("유튜브")));
+                "21:00",
+                3,
+                "23:00",
+                "07:00",
+                3,
+                false,
+                2,
+                null,
+                null,
+                List.of("유튜브"),
+                null,
+                null,
+                Map.of()));
   }
 
   @Test
