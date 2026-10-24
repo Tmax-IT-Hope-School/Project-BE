@@ -43,6 +43,7 @@ cron-job.org (알람 시계)                         Render 의 BE 서버
 | `domain/school/SchoolEventsJob.java` | `school-events` 작업. 우리 학생이 고른 학교의 학사일정을 NEIS 에서 새로 받음 (아래 6-7) |
 | `domain/goal/WeekGoalJudgeJob.java` | `weekly-goals` 작업. 끝난 주의 "이번 주 목표" 를 기록으로 달성 · 미달 판정해 적음 (아래 6-8) |
 | `domain/school/SchoolDailyJob.java` | `school-daily` 작업. 학교마다 NEIS 학사일정 · 급식을 미리 받고, 학교 홈페이지의 가정통신문 · 공지 제목을 읽어 둠 (아래 6-10) |
+| `domain/summary/DailySummaryJob.java` | `daily-summary` 작업. 사용자마다 오늘 · 어제의 하루 요약표(`daily_summaries`)를 덮어써서 만듦 (아래 6-11) |
 | `domain/job/JobResultStore.java` | 결과를 "작업 이름 + 날짜" 한 칸에 **덮어써서** 저장 (연습용 메모리 저장소) |
 | `global/time/DayRule.java` | **하루의 기준(새벽 4시, 한국 시간)** 계산기. 날짜별로 세는 곳은 모두 이걸 씀 |
 | `global/config/ClockConfig.java` | 시계. 테스트에서 시간을 고정하려고 따로 둠 |
@@ -150,6 +151,7 @@ URL 은 `https://project-be-mxxc.onrender.com/api/v1/jobs/<작업 이름>` 입�
 | `weekly-goals` | **매주 월요일** 05:00 | **PR #328 이 main 에 배포된 뒤** | 지난주 "이번 주 목표" 판정 | `[주 목표 판정] n개` | 6-8 (#328) |
 | `care-stages` | 매일 04:10 | **PR #331 이 main 에 배포된 뒤** | 모든 학생의 오늘 관리 단계 정하기 | `[관리 단계] 판정 n명` | 6-9 (#331) |
 | `school-daily` | 매일 05:00 (학교가 많아지면 05:00 ~ 06:00 10분마다) | **feat/school-daily-crawl 이 main 에 배포된 뒤** | 학교마다 학사일정 · 급식 미리 받기 + 홈페이지 가정통신문 · 공지 제목 읽기 (`school-events` 일도 같이 함) | `[학교 하루 작업] 학교 n곳 중 n곳을 처리했어요. …` | 6-10 |
+| `daily-summary` | 매일 03:30 | **#34 PR 이 main 에 배포되고, Neon main 에 `db/migrations/15-daily-summaries.sql` 을 실행한 뒤** | 사용자마다 오늘 · 어제의 하루 요약표 만들기 | `[하루 요약] 날짜 n명, 날짜 n명 만들었어요` | 6-11 (#34) |
 
 - **배포되기 전의 작업을 부르면 404 "그런 작업이 없어요"** 입니다. 실패가 계속 쌓이면 cron-job.org 가 알람을 꺼 버리므로(연속 25회), 표의 "언제 만드나" 가 지난 뒤에 만듭니다.
 - 하루가 바뀌는 때가 **새벽 4시**라서, "어제" 를 보는 작업은 4시 뒤(04:10 · 05:00)에 둡니다.
@@ -400,6 +402,46 @@ curl -i -X POST http://localhost:8080/api/v1/jobs/care-stages -H "X-Job-Key: loc
 
 ```bash
 curl -i -X POST http://localhost:8080/api/v1/jobs/school-daily -H "X-Job-Key: local-job-key"
+```
+
+### 6-11. 매일 밤 하루 요약표 만들기 (`daily-summary`)
+
+사용자마다 그날을 한 줄로 요약한 `daily_summaries` 를 만듭니다. 모든 분석과 리포트가 이 표 하나를 보고 계산하게 하려는 것입니다. (이슈 #34, `domain/summary/DailySummaryJob.java`, 표 설명은 [DB.md](./DB.md))
+
+| 칸 | 값 |
+| -- | -- |
+| URL | `https://<받은 주소>/api/v1/jobs/daily-summary` |
+| 실행 주기 | **하루 한 번, 새벽 3시 30분** (하루가 바뀌는 새벽 4시 전. 그날 공부가 거의 다 끝난 때) |
+| 요청 방법 | **POST** |
+| 헤더 | 이름 `X-Job-Key`, 값 = Render 에 넣은 **같은 키** |
+
+- 한 번 돌 때 **오늘과 어제를 둘 다** 다시 만듭니다.
+  - 그날의 미달 원인은 **다음 날 체크인**에 들어옵니다. 어제 요약을 오늘 다시 만들면 저절로 채워집니다.
+  - 3시 30분 ~ 4시 사이에 한 공부도, 다음 날 밤 "어제" 를 다시 만들 때 들어갑니다.
+- 결과는 그날 줄을 **덮어쓰기**라서, 두 번 돌아도 줄이 늘지 않고 값도 같습니다.
+- 공부를 안 한 날도 순공 0 인 줄이 생깁니다. 다만 **그날보다 뒤에 가입한 사람**은 만들지 않습니다.
+- 학생마다 따로 저장해서, 중간에 실패해도 앞의 학생 것은 남습니다. 실패하면 `500` 이고, 다시 돌리면 됩니다.
+- 로그에는 `[하루 요약] 2026-10-19 n명, 2026-10-20 n명 만들었어요` 처럼 **날짜와 숫자만** 남깁니다. 요약 안의 값(컨디션 · 기분 등)은 남기지 않습니다.
+- 한 번에 모든 학생을 처리합니다. 학생이 아주 많아져 30초 제한에 걸리면 나눠서 돌리도록 고칩니다.
+
+**지난 날짜를 다시 만들기** (기록을 고쳤을 때)
+
+예약 작업은 오늘 · 어제만 만듭니다. 그보다 전의 기록을 고쳤으면 날짜를 정해서 다시 만듭니다. 사람이 필요할 때 한 번 부르는 주소라 cron-job.org 에는 등록하지 않습니다.
+
+```bash
+# 2026-10-20 하루의 요약을 모든 사용자에 대해 다시 만듭니다 (덮어쓰기라 여러 번 불러도 안전)
+curl -i -X POST "https://<받은 주소>/api/v1/jobs/daily-summary/rebuild?date=2026-10-20" -H "X-Job-Key: <키>"
+```
+
+- 응답: `200 { "date": "2026-10-20", "userCount": 3, "message": "2026-10-20 하루 요약을 3명 다시 만들었어요" }`
+- 키가 없거나 틀리면 `401`, 날짜가 없거나 모양이 틀리면(`2026/10/20`) `400`, **아직 오지 않은 날짜**(새벽 4시 기준 내일부터)도 `400` 입니다.
+- 한 번에 하루씩입니다. 여러 날을 고쳤으면 날짜마다 한 번씩 부릅니다.
+
+**내 컴퓨터에서 시험**
+
+```bash
+curl -i -X POST http://localhost:8080/api/v1/jobs/daily-summary -H "X-Job-Key: local-job-key"
+curl -i -X POST "http://localhost:8080/api/v1/jobs/daily-summary/rebuild?date=2026-10-20" -H "X-Job-Key: local-job-key"
 ```
 
 ## 7. 알아 둘 점

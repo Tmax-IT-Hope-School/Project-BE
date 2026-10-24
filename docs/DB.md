@@ -55,6 +55,10 @@ erDiagram
     users ||--o| initial_plans : "user_id"
     users ||--o{ daily_care_stages : "user_id"
     users ||--o{ daily_signals : "user_id"
+    users ||--o{ daily_summaries : "user_id"
+    daily_summaries ||--o{ daily_summary_subjects : "daily_summary_id"
+    daily_summaries ||--o{ daily_summary_stop_reasons : "daily_summary_id"
+    subjects |o--o{ daily_summary_subjects : "subject_id"
     thinking_tests ||--o{ thinking_test_scores : "thinking_test_id"
     thinking_tests ||--o{ thinking_test_weaknesses : "thinking_test_id"
     users ||--o{ psych_tests : "user_id"
@@ -365,6 +369,42 @@ erDiagram
         int steps "하루 걸음 수, 모르면 비어 있음"
         boolean sns_over_thirty_minutes "SNS 를 30분 넘게 썼는지, 모르면 비어 있음"
     }
+    daily_summaries {
+        bigint id PK "줄을 구분하는 고유 번호"
+        bigint user_id FK "누구의 요약인지"
+        date summary_date "어느 날의 요약인지, 새벽 4시 기준 (같은 사람 안에서 날짜 중복 불가)"
+        int day_of_week "그날의 요일 (1 = 월요일 … 7 = 일요일)"
+        int study_minutes "순공시간(분), 일시정지 빼고 노는 기록 안 넣음. 공부 안 했으면 0"
+        int achievement_rate "계획 대비 달성률 0~100, 공부 계획이 없으면 비어 있음"
+        timestamptz first_start_at "그날 처음 공부를 시작한 시각, 기록이 없으면 비어 있음"
+        int session_count "공부 기록(세션) 수"
+        int average_session_minutes "기록 하나의 평균 순공(분), 기록이 없으면 0"
+        int pause_count "일시정지를 누른 횟수의 합"
+        int condition "컨디션 1~5, 체크인 안 했으면 비어 있음"
+        int mood "기분 1~5, 체크인 안 했으면 비어 있음"
+        varchar miss_reason "그날 못 채운 이유 (다음 날 체크인에서 옴), 비어 있을 수 있음"
+        int expected_minutes "예상 순공(분), 체크인 값이 없으면 공부 계획 목표 합"
+        boolean suggestion_kept "개선안을 실천했는지, 비어 있을 수 있음"
+        int sleep_minutes "잠잔 시간(분), daily_signals 에 없으면 비어 있음"
+        int target_session_count "목표 시간을 정하고 켠 타이머 수"
+        int completed_session_count "그중 목표를 다 채운 타이머 수"
+        int average_start_delay_minutes "계획 시각보다 평균 몇 분 늦게 시작했는지, 표본이 없으면 비어 있음"
+        int stop_progress_percent "목표 전에 멈춘 타이머가 평균 몇 %에서 멈췄는지, 표본이 없으면 비어 있음"
+        int play_planned_minutes "놀기로 계획한 시간(분)"
+        int play_actual_minutes "노는 계획으로 실제 논 시간(분)"
+    }
+    daily_summary_subjects {
+        bigint daily_summary_id FK "어느 요약의 줄인지"
+        int position "같은 요약 안에서 줄 순서 (JPA 가 채움)"
+        bigint subject_id FK "어느 과목인지, 과목 없이 공부한 시간이면 비어 있음"
+        int study_minutes "그 과목의 순공(분). 줄들을 더하면 study_minutes 와 같음"
+    }
+    daily_summary_stop_reasons {
+        bigint daily_summary_id FK "어느 요약의 줄인지"
+        int position "같은 요약 안에서 줄 순서 (JPA 가 채움)"
+        varchar stop_reason "멈춘 이유 (TIRED, EVENT, PHONE, TOO_MUCH, UNWILLING, SICK, PROCRASTINATED, ETC 중 하나)"
+        int stop_count "그날 이 이유로 멈춘 횟수"
+    }
     exams {
         bigint id PK "시험을 구분하는 고유 번호"
         bigint user_id FK "이 시험의 주인"
@@ -589,7 +629,7 @@ erDiagram
 | 체크인 #24 | 완료 | `checkins` |
 | 통화 요약 #29 | 완료 | `call_records` |
 | AI 메시지 #30 | 완료 | `messages` |
-| 하루 요약 #34 | 대기 | 현재 `DaySummary` 계산 객체만 있고 저장 엔티티 없음 |
+| 하루 요약 #34 | 완료 | `daily_summaries`, `daily_summary_subjects`, `daily_summary_stop_reasons` (계산은 `DaySummary` 등 기존 함수) |
 | 개선안·실험 #52 | 완료 | v3 자기 실험 `experiments` · `experiment_cards` (#52 · #54). 옛 v2 개선안 계산 객체는 그대로 |
 | 일기 #60 | 대기 | 저장 엔티티 없음 |
 | 잠금 해제 #67 | 완료 | `lock_events` 엔티티·그림·운영 SQL 반영 |
@@ -622,6 +662,9 @@ erDiagram
 | `push_subscriptions` | 웹 푸시(앱을 닫아도 오는 알림)를 받겠다고 한 기기 하나가 한 줄 (보낼 주소, 잠금 열쇠) | #32 |
 | `daily_care_stages` | 한 사람의 하루 관리 단계(0~4)와 그 이유가 한 줄. 하루에 한 번 정하고 바꾸지 않음 | #62 |
 | `daily_signals` | 한 사람의 하루치 휴대폰·수면·걸음 데이터가 한 줄 (수면 시간, 잠든·일어난 시각, 걸음 수, SNS 30분 초과). 같은 날을 다시 보내면 덮어씀. 날짜 말고는 다 비어도 됨 | #18 |
+| `daily_summaries` | 한 사람의 하루치 요약이 한 줄 (순공, 달성률, 첫 시작, 세션 수, 체크인 값, 수면, 목표·완주 타이머 수, 노는 시간 등). 매일 밤 예약 작업이 만들고, 같은 날을 다시 만들면 덮어씀. 공부를 안 한 날도 순공 0 인 줄이 생김 | #34 |
+| `daily_summary_subjects` | 요약 하나의 과목별 순공이 과목마다 한 줄 (`@ElementCollection`). 과목 없이 공부한 시간은 과목 번호를 비운 한 줄. 줄들을 더하면 순공과 같음 | #34 |
+| `daily_summary_stop_reasons` | 요약 하나의 멈춘 이유가 이유마다 한 줄 + 횟수 (`@ElementCollection`) | #34 |
 | `thinking_tests` | 생각 습관 테스트 한 번이 한 줄 (마친 시각, 테스트 모양 번호). 다시 하면 새 줄이 쌓임 | #35 |
 | `thinking_test_scores` | 테스트 한 번의 습관 8개 평균이 한 줄씩 (`@ElementCollection`) | #35 |
 | `thinking_test_weaknesses` | 테스트 한 번에서 고른 약점 칩이 한 줄씩 (`@ElementCollection`) | #35 |
@@ -767,6 +810,16 @@ erDiagram
 > - 이유 문장(`reason`)을 그대로 남깁니다. 규칙 문장이 나중에 바뀌어도 그날 학생이 본 문장이 남게 하려는 것입니다.
 > - 계산 재료(의지력 등)는 남기지 않습니다. 의지력은 어떤 응답에도 넣지 않는 값이라서입니다. (낙인 방지, `WillpowerNotInResponseTest`)
 > - `user_id` 가 있어서 탈퇴하면 같이 지워집니다.
+
+> `daily_summaries` 와 딸린 테이블 두 개는 2026-10-24 에 이슈 #34 에서 **학생이 직접 설계한** 테이블입니다. (AI 는 질문으로 돕고, 칸의 영어 이름만 정했습니다)
+> - **한 줄 = 한 사람의 하루치 요약 하나.** `(user_id, summary_date)` 가 겹치지 않게 막아 두었습니다. 같은 날을 다시 만들면 새 줄 없이 그 줄을 덮어써서, 예약 작업이 두 번 돌아도 안전합니다.
+> - 칸은 이슈 본문의 처음 목록 15개와 "바뀐 점" 의 추가 7개를 **전부** 넣었습니다. 그중 하루에 여러 개인 **과목별 순공 · 멈춘 이유는 체크인의 감정처럼 딸린 테이블**에 담았습니다.
+>   - 과목별 순공: 요약 번호 · 과목 · 분. **과목 없이 공부한 시간(카드로 켠 타이머)은 과목 번호를 비운 한 줄**로 모아서, 줄들의 합이 순공과 같게 했습니다.
+>   - 멈춘 이유: 멈출 때마다 한 줄이 아니라 **이유마다 한 줄 + 몇 번**(세기 편해서).
+> - **값이 없을 때:** 타이머 · 계획에서 센 숫자는 0, 학생이 답하지 않은 값(컨디션 · 기분 …)과 계산할 수 없는 값(계획 없는 날의 달성률 …)은 비워 둡니다. 그래서 "줄이 없는 날 = 아직 안 만든 날(가입 전 포함)", "줄은 있는데 순공 0 = 공부를 안 한 날" 로 구별됩니다.
+> - **미달 원인은 다음 날 체크인에서 옵니다.** (체크인의 미달 원인 = 어제 못 채운 이유) 그래서 매일 밤 작업이 **오늘과 어제를 둘 다** 다시 만들어, 하루 늦게 저절로 채워지게 했습니다. (학생이 고름)
+> - 딸린 테이블의 `position` 칸은 학생이 정한 칸이 아니라, JPA 가 같은 요약 안의 줄을 구분하려고 채우는 순서 번호입니다.
+> - 컨디션 · 기분 · 미달 원인이 들어 있어서 이 표도 로그에 찍지 않습니다. `user_id` 가 있어서 탈퇴하면 같이 지워집니다. (딸린 테이블은 `AccountServiceTest` 의 `CHILD_TABLES` 에 더함)
 
 > `experiments` · `experiment_cards` 는 2026-10-18 에 이슈 #52 · #54 에서 **AI 가 만든 테이블**입니다. (사용자 "테이블 상관없이 BE 이슈 계속", **PR 리뷰에서 학생이 꼭 확인해 주세요**)
 > - 실험은 **새 카드가 아니라 있던 카드에 붙는 규칙**이라서, 붙인 카드는 딸린 테이블(`experiment_cards`)에 번호만 담습니다. 판정은 그 카드들의 카드 결과로 합니다.
