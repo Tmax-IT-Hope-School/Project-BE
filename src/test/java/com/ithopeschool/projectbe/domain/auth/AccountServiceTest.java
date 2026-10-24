@@ -18,6 +18,7 @@ import com.ithopeschool.projectbe.domain.bias.Weakness;
 import com.ithopeschool.projectbe.domain.call.CallRecord;
 import com.ithopeschool.projectbe.domain.card.Card;
 import com.ithopeschool.projectbe.domain.card.ChecklistItem;
+import com.ithopeschool.projectbe.domain.care.MissReason;
 import com.ithopeschool.projectbe.domain.checkin.CheckIn;
 import com.ithopeschool.projectbe.domain.checkin.CheckInSource;
 import com.ithopeschool.projectbe.domain.checkin.EmotionTag;
@@ -32,6 +33,7 @@ import com.ithopeschool.projectbe.domain.onboarding.FailureCause;
 import com.ithopeschool.projectbe.domain.onboarding.Grade;
 import com.ithopeschool.projectbe.domain.onboarding.OnboardingAnswer;
 import com.ithopeschool.projectbe.domain.onboarding.SubjectLevel;
+import com.ithopeschool.projectbe.domain.plan.DayProgress;
 import com.ithopeschool.projectbe.domain.plan.PlanKind;
 import com.ithopeschool.projectbe.domain.plan.StudyPlan;
 import com.ithopeschool.projectbe.domain.psychtest.PsychItem;
@@ -45,8 +47,13 @@ import com.ithopeschool.projectbe.domain.session.SessionPause;
 import com.ithopeschool.projectbe.domain.session.SessionTags.GoodReason;
 import com.ithopeschool.projectbe.domain.session.SessionTags.PauseTag;
 import com.ithopeschool.projectbe.domain.session.StudySession;
+import com.ithopeschool.projectbe.domain.stats.StudyFacts;
 import com.ithopeschool.projectbe.domain.subject.Subject;
 import com.ithopeschool.projectbe.domain.subject.SubjectColor;
+import com.ithopeschool.projectbe.domain.summary.DailySummary;
+import com.ithopeschool.projectbe.domain.summary.DailySummaryStopReason;
+import com.ithopeschool.projectbe.domain.summary.DailySummarySubject;
+import com.ithopeschool.projectbe.domain.summary.DaySummary;
 import com.ithopeschool.projectbe.domain.thinkingtest.ThinkingTest;
 import com.ithopeschool.projectbe.domain.user.UserRepository;
 import com.ithopeschool.projectbe.global.auth.CurrentUserProvider;
@@ -612,7 +619,11 @@ class AccountServiceTest {
           // 심리검사(psych_tests)에 매달린 문장 14개의 답 (이슈 #219)
           Map.entry("PSYCH_TEST_ANSWERS", new String[] {"PSYCH_TESTS", "PSYCH_TEST_ID"}),
           // 자기 실험(experiments)에 매달린 "실험 규칙을 붙인 카드" (이슈 #52)
-          Map.entry("EXPERIMENT_CARDS", new String[] {"EXPERIMENTS", "EXPERIMENT_ID"}));
+          Map.entry("EXPERIMENT_CARDS", new String[] {"EXPERIMENTS", "EXPERIMENT_ID"}),
+          // 하루 요약(daily_summaries)에 매달린 과목별 순공 · 멈춘 이유 (이슈 #34)
+          Map.entry("DAILY_SUMMARY_SUBJECTS", new String[] {"DAILY_SUMMARIES", "DAILY_SUMMARY_ID"}),
+          Map.entry(
+              "DAILY_SUMMARY_STOP_REASONS", new String[] {"DAILY_SUMMARIES", "DAILY_SUMMARY_ID"}));
 
   // 사람이 아니라 학교마다 한 벌인 공개 자료(NEIS 학사일정, 이슈 #282)입니다. 개인 정보가 없고
   // 같은 학교 학생들이 같이 쓰므로 탈퇴해도 지우지 않습니다.
@@ -730,6 +741,18 @@ class AccountServiceTest {
               LocalDate.of(2026, 10, 12),
               RiskLevel.WATCH,
               EnumSet.of(RiskReason.LATE_SLEEP)));
+      // 하루 요약의 딸린 테이블(과목별 순공 · 멈춘 이유)에도 줄을 넣어 둡니다.
+      LocalDate summaryDate = LocalDate.of(2026, 10, 15);
+      DailySummary summary = new DailySummary(userId, summaryDate);
+      summary.overwrite(
+          DaySummary.of(summaryDate, List.of(), List.of()),
+          0,
+          StudyFacts.of(List.of(), List.of(), summaryDate, summaryDate),
+          new DayProgress.PlayProgress(0, 0, 0),
+          new DailySummary.Answers(null, null, null, 0, null, null),
+          List.of(new DailySummarySubject(1L, 30), new DailySummarySubject(null, 10)),
+          List.of(new DailySummaryStopReason(MissReason.TIRED, 1)));
+      entityManager.persist(summary);
     }
     entityManager.flush();
     callWith(tokenOfA);
