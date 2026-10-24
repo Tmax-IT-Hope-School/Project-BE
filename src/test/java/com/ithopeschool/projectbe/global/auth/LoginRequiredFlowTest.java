@@ -396,6 +396,12 @@ class LoginRequiredFlowTest {
           // 첫 가설 (설문 답으로 만든 문장이라 학생의 정보입니다)
           new Api("GET", "/api/v1/insights/hypotheses", "/api/v1/insights/hypotheses", null),
           new Api("GET", "/api/v1/insights/score-study", "/api/v1/insights/score-study", null),
+          // 조건-성과 관계 (내 수면·컨디션·공부 기록으로 계산합니다)
+          new Api(
+              "GET",
+              "/api/v1/insights/condition-performance",
+              "/api/v1/insights/condition-performance",
+              null),
           // 인사이트 반응 버튼 (내 인사이트에만 반응할 수 있습니다)
           new Api(
               "POST",
