@@ -8,8 +8,8 @@
 --   source_problems.passage_text  : 문제가 기대는 지문
 --
 -- 누가 · 언제 실행하나요?
---   변형 문제 표(19-variant-problems.sql, 22 번으로 옮길 예정) 다음에 실행합니다. 그 표가 없으면 이 파일은 에러가 납니다.
---   (번호: develop 에 19-quiz-results · 20-weekly-picks · 21-card-subject 가 있고, 변형 표는 22 로 옮길 예정이라 23 번입니다)
+--   변형 문제 표(22-variant-problems.sql) 다음에 실행합니다. 그 표가 없으면 이 파일은 에러가 납니다.
+--   (번호: develop 에 19-quiz-results · 20-weekly-picks · 21-card-subject 가 있고, 변형 표가 22 번이라 23 번입니다)
 --   Neon 콘솔 → 브랜치 고르기 → SQL Editor 에 이 파일 전체를 붙여 넣고 Run. dev 먼저, main 은 그다음.
 --
 -- 여러 번 실행해도 되나요?
