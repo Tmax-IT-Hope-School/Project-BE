@@ -5890,6 +5890,51 @@ AI 가 보낸 메시지(당근·넛지·채찍·이벤트 알림·회복)를 보
 
 `PATCH /api/v1/variant/source-problems/{id}/classification` — `pending_classification` · `needs_review` 원본의 단원 · 유형을 사람이 정합니다. 본문 `{ "unitCode": "CM1-U05", "typeCode": "CM1-U05-T03" }`. 틀린 문항이면 이때 학습 항목이 생깁니다. 다른 상태의 원본이면 409.
 
+#### 확인 문제 결과를 원본으로 (2026-10-24, #394)
+
+`POST /api/v1/variant/quiz-results` — 공부 카드를 끝내고 푼 **확인 문제**(`POST /api/v1/ai/quiz`, 4지선다) 한 묶음을 보내면, 문제마다 확인한 뒤 변형 문제의 원본으로 저장합니다. (VARIANT-SPEC.md 5-1)
+
+> ⚠️ 통계 탭의 `POST /api/v1/quiz-results`(퀴즈 요약 통계, 다른 기능)와 **다른 주소 · 다른 목적**입니다. 이 API 는 문제 하나하나를 변형 문제의 원본으로 씁니다.
+
+```json
+{
+  "topic": "국어 비문학 3지문",
+  "solvedAt": 1792841400000,
+  "guessed": false,
+  "questions": [
+    { "question": "윗글의 내용과 일치하는 것은?", "passage": "…지문…",
+      "choices": ["…", "…", "…", "…"], "answerIndex": 2, "chosenIndex": 1 }
+  ]
+}
+```
+
+| 필드                          | 규칙                                                                                   |
+| ----------------------------- | -------------------------------------------------------------------------------------- |
+| `topic`                       | 필수. 100자까지. 무엇에 대한 문제였는지                                                |
+| `solvedAt`                    | 필수. 다 푼 순간 (밀리초 숫자)                                                         |
+| `guessed`                     | 필수. FE 가 "찍은 것 같다" 고 본 결과면 true → **맞힌 문제는 원본으로 쓰지 않음**      |
+| `questions`                   | 필수. 1 ~ 5개                                                                          |
+| `question`                    | 필수. 2000자까지                                                                       |
+| `passage`                     | 선택(null 가능). 문제가 기대는 지문, 2000자까지                                        |
+| `choices`                     | 필수. 정확히 4개, 하나에 200자까지                                                     |
+| `answerIndex` · `chosenIndex` | 필수. 0 ~ 3 정수 (소수면 400)                                                          |
+
+문제마다 서버가 하는 일:
+
+1. **맞았는지는 서버가 다시 셉니다**(`chosenIndex == answerIndex`). FE 판정은 쓰지 않습니다.
+2. `guessed=true` 면 맞힌 문제는 건너뜁니다(`skipped.guessedCorrect`).
+3. **정답 확인**: 정답을 숨긴 채 AI 에게 다시 풀게 해서 `answerIndex` 와 다르면 저장하지 않습니다(`skipped.answerMismatch`). 확인 문제도 AI 가 만든 것이라 정답이 틀릴 수 있기 때문입니다.
+4. **분류**: 고1 공통수학1 이면 단원 · 유형(분류체계), 그 밖의 과목이면 **2022 개정 성취기준**(`resources/curriculum/2022-*.json`) 코드. 어디에도 안 맞거나 자신 없는 수학 밖 과목은 저장하지 않습니다(`skipped.unsupported`). 수학인데 자신이 없으면 `needs_review` 로 저장합니다.
+5. 저장(`origin=QUIZ`). 틀린 문제는 학습 항목이 생겨 **다음 날부터 매일 검증 문제**, 맞은 문제는 **주간 심화 (A)** 의 재료가 됩니다.
+
+**AI 가 꺼져 있거나 답하지 않으면** 정답을 확인할 수 없어서 저장하지 않습니다(`skipped.unsupported`). 문제마다 AI 를 2 ~ 3번 부르므로 응답이 수십 초 걸릴 수 있습니다. FE 는 기다리지 않고 보내기만 합니다.
+
+**응답 200** — `{ "registered": 2, "skipped": { "answerMismatch": 1, "guessedCorrect": 0, "unsupported": 0 } }`
+
+- 400: 칸이 없음 · 보기가 4개가 아님 · 번호가 0 ~ 3 밖 · 문제가 0개거나 6개 이상 · 글자 수 초과
+- 401: 로그인하지 않음 · 403: 최신 동의 문구에 동의하지 않음 (저장하는 요청)
+- 수학이 아닌 과목의 원본은 저장되지만, **변형 문제를 만드는 것은 다음 PR(수학 밖 과목 변형)부터**입니다.
+
 #### 그날의 일일 과제
 
 `GET /api/v1/variant/daily?date=2026-10-25` — `date` 를 빼면 오늘(새벽 4시 기준). 오늘을 부르면 **이미 만들어 둔 변형**이 있는 항목을 바로 배정합니다(여러 번 불러도 같음). 아직 못 만든 수는 `preparingCount` 입니다. (변형은 예약 작업 `variant-daily` 가 만듭니다)

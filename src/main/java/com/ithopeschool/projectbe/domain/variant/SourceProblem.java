@@ -42,6 +42,11 @@ public class SourceProblem {
   public static final int MAX_TEXT_LENGTH = 2000;
   public static final int MAX_ANSWER_LENGTH = 200;
   public static final int MAX_CHOICE_LENGTH = 200;
+  public static final int MAX_SUBJECT_LENGTH = 30;
+  public static final int MAX_STANDARD_CODE_LENGTH = 30;
+
+  // 수학 분류체계(taxonomy.json)가 다루는 과목. 예전 원본처럼 과목이 비어 있으면 이 과목으로 봅니다
+  public static final String MATH_SUBJECT = "공통수학1";
 
   // 원본 번호
   @Id
@@ -107,6 +112,26 @@ public class SourceProblem {
   @Column(nullable = false, length = 64)
   private String fingerprint;
 
+  // ---- 확인 문제 연결 · 수학이 아닌 과목 (docs/VARIANT-SPEC.md 4-1, 2026-10-24) ----
+  // ⚠️ 아래 칸 이름은 AI 가 지었습니다. 담당 학생이 확인해 주세요. (docs/DB.md)
+
+  // 어디서 들어온 원본인지 (직접 등록 · 시드 · 확인 문제)
+  @Enumerated(EnumType.STRING)
+  @Column(nullable = false, length = 10)
+  private SourceProblemOrigin origin;
+
+  // 과목 이름 (성취기준 파일의 이름, 예: 공통국어1). 예전 원본(직접 등록 · 시드)은 비어 있고 고1 공통수학1 로 봅니다
+  @Column(length = MAX_SUBJECT_LENGTH)
+  private String subject;
+
+  // 성취기준 코드 (예: 10공국1-02-01). 수학이 아닌 과목만 채웁니다. 비어 있으면 수학 분류체계(단원 · 유형)를 씁니다
+  @Column(length = MAX_STANDARD_CODE_LENGTH)
+  private String standardCode;
+
+  // 문제가 기대는 지문 (국어 · 영어 독해 등). 없으면 비어 있음
+  @Column(length = MAX_TEXT_LENGTH)
+  private String passageText;
+
   // 학생이 푼 순간
   @Column(nullable = false)
   private Instant solvedAt;
@@ -125,6 +150,34 @@ public class SourceProblem {
       boolean hasFigure,
       Instant solvedAt,
       Instant createdAt) {
+    this(
+        userId,
+        problemText,
+        choices,
+        correctAnswer,
+        studentAnswer,
+        isCorrect,
+        hasFigure,
+        solvedAt,
+        createdAt,
+        SourceProblemOrigin.MANUAL,
+        null);
+  }
+
+  //   origin      : 어디서 들어온 원본인지
+  //   passageText : 문제가 기대는 지문 (없으면 null)
+  public SourceProblem(
+      Long userId,
+      String problemText,
+      List<String> choices,
+      String correctAnswer,
+      String studentAnswer,
+      boolean isCorrect,
+      boolean hasFigure,
+      Instant solvedAt,
+      Instant createdAt,
+      SourceProblemOrigin origin,
+      String passageText) {
     this.userId = userId;
     this.problemText = problemText;
     this.choices = choices == null ? new ArrayList<>() : new ArrayList<>(choices);
@@ -135,13 +188,32 @@ public class SourceProblem {
     this.fingerprint = VariantFingerprint.of(problemText);
     this.solvedAt = solvedAt;
     this.createdAt = createdAt;
+    this.origin = origin;
+    this.passageText = passageText == null || passageText.isBlank() ? null : passageText;
     // 분류가 정해지기 전에는 출제하지 않습니다. markXxx 로 바꿉니다.
     this.supportStatus = SupportStatus.PENDING_CLASSIFICATION;
   }
 
-  // 분류가 끝나서 출제에 쓸 수 있습니다.
+  // 수학 분류체계(단원 · 유형)로 다루는 원본인지. 성취기준 코드가 있으면 수학이 아닌 과목입니다.
+  public boolean isMath() {
+    return standardCode == null;
+  }
+
+  // 수학이 아닌 과목: 성취기준으로 분류가 끝나서 출제에 쓸 수 있습니다.
+  public void markSupportedByStandard(String subject, String standardCode, Double confidence) {
+    this.subject = subject;
+    this.standardCode = standardCode;
+    this.unitCode = null;
+    this.typeCode = null;
+    this.classificationSource = ClassificationSource.LLM;
+    this.classificationConfidence = confidence;
+    this.supportStatus = SupportStatus.SUPPORTED;
+  }
+
+  // 분류가 끝나서 출제에 쓸 수 있습니다. (수학 분류체계)
   public void markSupported(
       String unitCode, String typeCode, ClassificationSource source, Double confidence) {
+    this.subject = MATH_SUBJECT;
     this.unitCode = unitCode;
     this.typeCode = typeCode;
     this.classificationSource = source;
