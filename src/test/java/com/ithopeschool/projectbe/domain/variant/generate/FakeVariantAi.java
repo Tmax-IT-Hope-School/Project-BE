@@ -14,6 +14,10 @@ public class FakeVariantAi implements VariantAi {
   private final Deque<Optional<VariantDraft>> drafts = new ArrayDeque<>();
   private final Deque<Optional<ClassificationDraft>> classifications = new ArrayDeque<>();
   private final Deque<Optional<SolveCheckDraft>> solveChecks = new ArrayDeque<>();
+  private final Deque<Optional<QuizClassificationDraft>> quizClassifications = new ArrayDeque<>();
+  // 독립 풀이 · 확인 문제 분류 프롬프트로 받은 user 칸들 (부른 순서)
+  public final List<String> solveInputs = new ArrayList<>();
+  public final List<String> quizClassifyInputs = new ArrayList<>();
   // 변형 생성 프롬프트로 받은 user 칸들 (부른 순서)
   public final List<String> variantInputs = new ArrayList<>();
   public final List<String> classifyInputs = new ArrayList<>();
@@ -29,8 +33,11 @@ public class FakeVariantAi implements VariantAi {
     drafts.clear();
     classifications.clear();
     solveChecks.clear();
+    quizClassifications.clear();
     variantInputs.clear();
     classifyInputs.clear();
+    solveInputs.clear();
+    quizClassifyInputs.clear();
     fallback = null;
   }
 
@@ -52,6 +59,11 @@ public class FakeVariantAi implements VariantAi {
 
   public FakeVariantAi willSolve(SolveCheckDraft draft) {
     solveChecks.add(Optional.ofNullable(draft));
+    return this;
+  }
+
+  public FakeVariantAi willClassifyQuiz(QuizClassificationDraft draft) {
+    quizClassifications.add(Optional.ofNullable(draft));
     return this;
   }
 
@@ -90,6 +102,14 @@ public class FakeVariantAi implements VariantAi {
 
   @Override
   public Optional<SolveCheckDraft> solveCheck(Long userId, String instructions, String input) {
+    solveInputs.add(input);
     return solveChecks.isEmpty() ? Optional.empty() : solveChecks.poll();
+  }
+
+  @Override
+  public Optional<QuizClassificationDraft> classifyQuiz(
+      Long userId, String instructions, String input) {
+    quizClassifyInputs.add(input);
+    return quizClassifications.isEmpty() ? Optional.empty() : quizClassifications.poll();
   }
 }

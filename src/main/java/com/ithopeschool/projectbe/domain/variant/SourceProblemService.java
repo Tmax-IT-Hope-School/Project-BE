@@ -40,8 +40,14 @@ public class SourceProblemService {
     return registerFor(currentUserProvider.getCurrentUserId(), request);
   }
 
-  // 정해진 학생의 원본을 등록합니다. (시드 데이터를 넣을 때도 씁니다)
+  // 정해진 학생의 원본을 등록합니다. (평가 도구가 씁니다)
   public SourceProblemResponse registerFor(Long userId, SourceProblemCreateRequest request) {
+    return registerFor(userId, request, SourceProblemOrigin.MANUAL);
+  }
+
+  // 정해진 학생의 원본을 어디서 왔는지와 함께 등록합니다. (시드 데이터는 SEED)
+  public SourceProblemResponse registerFor(
+      Long userId, SourceProblemCreateRequest request, SourceProblemOrigin origin) {
     boolean hasUnit = request.unitCode() != null && !request.unitCode().isBlank();
     boolean hasType = request.typeCode() != null && !request.typeCode().isBlank();
     if (hasUnit != hasType) {
@@ -61,7 +67,9 @@ public class SourceProblemService {
             request.isCorrect(),
             Boolean.TRUE.equals(request.hasFigure()),
             Instant.ofEpochMilli(request.solvedAt()),
-            clock.instant());
+            clock.instant(),
+            origin,
+            null);
 
     if (source.isHasFigure()) {
       source.markUnsupportedFigure();
@@ -114,8 +122,8 @@ public class SourceProblemService {
   }
 
   // 틀린 원본이고 출제에 쓸 수 있으면 학습 항목을 만듭니다. 다음 날(새벽 4시 기준)부터 냅니다.
-  // 이미 그 원본의 항목이 있으면 만들지 않습니다.
-  private ReviewItem createReviewItemIfNeeded(SourceProblem source) {
+  // 이미 그 원본의 항목이 있으면 만들지 않습니다. (확인 문제 결과 VariantQuizSourceService 도 씁니다)
+  ReviewItem createReviewItemIfNeeded(SourceProblem source) {
     if (source.isCorrect() || source.getSupportStatus() != SupportStatus.SUPPORTED) {
       return null;
     }

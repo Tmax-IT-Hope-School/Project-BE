@@ -678,6 +678,10 @@ erDiagram
         varchar support_status "SUPPORTED, PENDING_CLASSIFICATION, NEEDS_REVIEW, UNSUPPORTED_FIGURE"
         varchar fingerprint "같은 문제인지 보는 지문"
         timestamptz solved_at "푼 순간"
+        varchar origin "MANUAL, SEED, QUIZ (어디서 들어왔는지)"
+        varchar subject "과목 이름 (비면 고1 공통수학1)"
+        varchar standard_code "성취기준 코드 (수학이 아닌 과목만)"
+        varchar passage_text "문제가 기대는 지문"
     }
     source_problem_choices {
         bigint source_problem_id FK "어느 원본의 선지인지"
@@ -1022,6 +1026,7 @@ erDiagram
 > - 모든 테이블에 `user_id` 가 있어서 탈퇴하면 같이 지워집니다. 테이블끼리는 **번호만 적고 외래키를 걸지 않습니다**(그림의 "번호만" 선). 탈퇴할 때 테이블을 순서 없이 지우기 때문입니다. 선지 딸린 테이블 두 개는 `AccountServiceTest` 의 `CHILD_TABLES` 에 더했습니다.
 > - "같은 원본에 ACTIVE 학습 항목은 하나" · "한 항목에 하루 한 과제" 는 원래 설계의 **부분 유니크 인덱스** 대신 **있을 때만 채우는 칸 + 유니크**(`active_source_problem_id`, `daily_review_item_id`)로 지킵니다. 로컬 DB(H2)가 부분 인덱스를 지원하지 않기 때문입니다. 비어 있는(null) 칸끼리는 겹친다고 보지 않습니다.
 > - `value` 는 H2 예약어라서 `value_expr` 로 했습니다. (주간 세트는 같은 저장소의 weekly_goals 처럼 `week_start` 날짜를 씁니다)
+> - `source_problems` 의 `origin` · `subject` · `standard_code` · `passage_text` 는 2026-10-24 확인 문제 연결(#394, migration 23)에서 더했습니다. **칸 이름은 AI 가 지었습니다 — 담당 학생이 확인해 주세요.** 이미 있던 줄은 `origin=MANUAL`, `subject` 는 비어 있음(= 고1 공통수학1)입니다. 성취기준 코드가 있으면 수학이 아닌 과목이고, 그때는 단원 · 유형 코드가 비어 있습니다.
 
 ## 그림 읽는 법
 

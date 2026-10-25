@@ -31,7 +31,8 @@ public class VariantSeedInitializer implements ApplicationRunner {
   public void run(ApplicationArguments args) {
     int count = 0;
     for (VariantSeedData.Problem problem : VariantSeedData.load()) {
-      sourceProblemService.registerFor(CurrentUserProvider.TEST_USER_ID, problem.toRequest(true));
+      sourceProblemService.registerFor(
+          CurrentUserProvider.TEST_USER_ID, problem.toRequest(true), SourceProblemOrigin.SEED);
       count++;
     }
     log.info("[변형 시드] 테스트 사용자에게 원본 문항 {}개를 등록했어요", count);

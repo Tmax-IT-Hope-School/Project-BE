@@ -610,6 +610,13 @@ class LoginRequiredFlowTest {
               "/api/v1/variant/source-problems",
               "{\"problemText\":\"문제\",\"isCorrect\":false,\"solvedAt\":1792841400000}"),
           new Api(
+              "POST",
+              "/api/v1/variant/quiz-results",
+              "/api/v1/variant/quiz-results",
+              "{\"topic\":\"주제\",\"solvedAt\":1792841400000,\"guessed\":false,\"questions\":"
+                  + "[{\"question\":\"문제\",\"passage\":null,\"choices\":[\"가\",\"나\",\"다\",\"라\"],"
+                  + "\"answerIndex\":0,\"chosenIndex\":1}]}"),
+          new Api(
               "PATCH",
               "/api/v1/variant/source-problems/{id}/classification",
               "/api/v1/variant/source-problems/1/classification",

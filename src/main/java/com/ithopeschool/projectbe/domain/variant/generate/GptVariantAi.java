@@ -59,6 +59,14 @@ public class GptVariantAi implements VariantAi {
     return aiClient.askLong(userId, GptUsageKind.VARIANT, question, SolveCheckDraft.class);
   }
 
+  @Override
+  public Optional<QuizClassificationDraft> classifyQuiz(
+      Long userId, String instructions, String input) {
+    AiQuestion question =
+        new AiQuestion("variant_quiz_classification", instructions, input, quizClassifySchema());
+    return aiClient.ask(userId, GptUsageKind.VARIANT, question, QuizClassificationDraft.class);
+  }
+
   // 변형 문항의 답 모양 (VariantDraft 와 같은 칸)
   static Map<String, Object> variantSchema() {
     Map<String, Object> properties = new LinkedHashMap<>();
@@ -79,6 +87,19 @@ public class GptVariantAi implements VariantAi {
     Map<String, Object> properties = new LinkedHashMap<>();
     properties.put("unitCode", AiSchema.string());
     properties.put("typeCode", AiSchema.string());
+    properties.put("confidence", Map.of("type", "number"));
+    properties.put("figureRequired", Map.of("type", "boolean"));
+    properties.put("reason", AiSchema.string());
+    return AiSchema.object(properties);
+  }
+
+  // 확인 문제 분류 답 모양 (QuizClassificationDraft 와 같은 칸)
+  static Map<String, Object> quizClassifySchema() {
+    Map<String, Object> properties = new LinkedHashMap<>();
+    properties.put("kind", AiSchema.enumOf(List.of("MATH", "STANDARD", "NONE")));
+    properties.put("unitCode", AiSchema.string());
+    properties.put("typeCode", AiSchema.string());
+    properties.put("standardCode", AiSchema.string());
     properties.put("confidence", Map.of("type", "number"));
     properties.put("figureRequired", Map.of("type", "boolean"));
     properties.put("reason", AiSchema.string());

@@ -28,6 +28,67 @@ class VariantControllerTest {
   @MockitoBean private SourceProblemService sourceProblemService;
   @MockitoBean private AttemptService attemptService;
   @MockitoBean private VariantQueryService queryService;
+  @MockitoBean private VariantQuizSourceService quizSourceService;
+
+  // 확인 문제 결과 요청 본문. questionJson 은 문제 하나의 JSON
+  private static String quizBody(String questionJson) {
+    return "{\"topic\":\"국어 비문학\",\"solvedAt\":1792841400000,\"guessed\":false,\"questions\":["
+        + questionJson
+        + "]}";
+  }
+
+  private static final String QUIZ_QUESTION =
+      "{\"question\":\"문제\",\"passage\":null,\"choices\":[\"가\",\"나\",\"다\",\"라\"],"
+          + "\"answerIndex\":2,\"chosenIndex\":1}";
+
+  @Test
+  @DisplayName("확인 문제 결과는 200 과 저장 · 건너뛴 수를 돌려준다")
+  void quizResultsReturnsCounts() throws Exception {
+    given(quizSourceService.submit(any()))
+        .willReturn(
+            new com.ithopeschool.projectbe.domain.variant.dto.VariantQuizSourceResponse(
+                1,
+                new com.ithopeschool.projectbe.domain.variant.dto.VariantQuizSourceResponse.Skipped(
+                    0, 0, 0)));
+
+    postJson("/api/v1/variant/quiz-results", quizBody(QUIZ_QUESTION))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.registered").value(1))
+        .andExpect(jsonPath("$.skipped.answerMismatch").value(0));
+  }
+
+  @Test
+  @DisplayName("확인 문제 결과: 보기가 4개가 아니거나, 번호가 0 ~ 3 밖 · 소수이거나, 문제가 0개 · 6개면 400 이고 Service 를 부르지 않는다")
+  void quizResultsValidation() throws Exception {
+    postJson(
+            "/api/v1/variant/quiz-results",
+            quizBody(QUIZ_QUESTION.replace("[\"가\",\"나\",\"다\",\"라\"]", "[\"가\",\"나\",\"다\"]")))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.error.message").value("보기는 4개를 보내 주세요"));
+    postJson(
+            "/api/v1/variant/quiz-results",
+            quizBody(QUIZ_QUESTION.replace("\"answerIndex\":2", "\"answerIndex\":4")))
+        .andExpect(status().isBadRequest());
+    postJson(
+            "/api/v1/variant/quiz-results",
+            quizBody(QUIZ_QUESTION.replace("\"chosenIndex\":1", "\"chosenIndex\":1.5")))
+        .andExpect(status().isBadRequest());
+    postJson(
+            "/api/v1/variant/quiz-results",
+            quizBody(
+                QUIZ_QUESTION.replace(
+                    "\"passage\":null", "\"passage\":\"" + "가".repeat(2001) + "\"")))
+        .andExpect(status().isBadRequest());
+    postJson("/api/v1/variant/quiz-results", quizBody("")).andExpect(status().isBadRequest());
+    String six = String.join(",", java.util.Collections.nCopies(6, QUIZ_QUESTION));
+    postJson("/api/v1/variant/quiz-results", quizBody(six)).andExpect(status().isBadRequest());
+    postJson(
+            "/api/v1/variant/quiz-results",
+            "{\"solvedAt\":1,\"guessed\":false,\"questions\":[" + QUIZ_QUESTION + "]}")
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.error.message").value("주제(topic)를 보내 주세요"));
+    verifyNoInteractions(quizSourceService);
+  }
 
   private ResultActions postJson(String url, String body) throws Exception {
     return mockMvc.perform(post(url).contentType(MediaType.APPLICATION_JSON).content(body));

@@ -22,4 +22,7 @@ public interface VariantAi {
   Optional<ClassificationDraft> classify(Long userId, String instructions, String input);
 
   Optional<SolveCheckDraft> solveCheck(Long userId, String instructions, String input);
+
+  // 확인 문제를 수학 분류체계 · 성취기준 중 하나로 분류합니다. (docs/VARIANT-SPEC.md 5-1)
+  Optional<QuizClassificationDraft> classifyQuiz(Long userId, String instructions, String input);
 }
