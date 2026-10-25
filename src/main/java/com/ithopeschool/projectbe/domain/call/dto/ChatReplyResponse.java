@@ -19,7 +19,11 @@ import java.util.List;
 //   action 이 null 이면 행동 버튼이 없습니다. 서버가 모양 · 길이 · 말투를 검사한 뒤에만 넣습니다. (ChatService.cleanTurn)
 //   make_plan 만 date(마감 날 "YYYY-MM-DD")를 씁니다. 다른 행동은 date 가 null 입니다. (2026-10-18)
 //   { …, "action": { "type": "make_plan", "minutes": null, "title": "중간고사 미적분", "date":
-// "2026-11-02" } }
+// "2026-11-02", "startTime": null } }
+//   day_plan(오늘 하루 계획 초안, 계획 방, 2026-10-25 #431)만 startTime(시작 시각 "HH:mm")을 씁니다.
+//   minutes 는 학생과 정한 오늘 총 공부 분, title 은 먼저 할 것 한 줄이고, 정하지 않았으면 각각 null 입니다.
+//   { …, "action": { "type": "day_plan", "minutes": 120, "title": "수학 먼저", "date": null,
+// "startTime": "21:00" } }
 //
 // tags (2026-10-18 "코치랑 이야기하기"): "공부 끝 후기" · "못 한 카드" 주제로 연 채팅에서 AI 가 학생 말에서 짐작한 이유 값입니다.
 //   { …, "tags": ["phone", "tired"] }
@@ -47,11 +51,18 @@ public record ChatReplyResponse(
   // minutes 분)
   //         make_plan(긴 계획 짜기: 목표 title, 마감 날 date → FE 가 /ai/long-plan) ·
   //         start_quiz(확인 문제: 주제 title → FE 가 /ai/quiz)
-  public record Action(String type, Integer minutes, String title, String date) {
+  //         day_plan(오늘 하루 계획 초안: 총 분 minutes · 먼저 할 것 title · 시작 시각 startTime → FE 가 /ai/day-plan)
+  // date 는 make_plan 에만, startTime 은 day_plan 에만 씁니다. 다른 행동은 null 입니다.
+  public record Action(String type, Integer minutes, String title, String date, String startTime) {
 
-    // date 가 없는 행동 (start_timer · shrink_today · create_card · start_quiz)
+    // date · startTime 이 없는 행동 (start_timer · shrink_today · create_card · start_quiz)
     public Action(String type, Integer minutes, String title) {
-      this(type, minutes, title, null);
+      this(type, minutes, title, null, null);
+    }
+
+    // startTime 이 없는 행동 (make_plan)
+    public Action(String type, Integer minutes, String title, String date) {
+      this(type, minutes, title, date, null);
     }
   }
 

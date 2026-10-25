@@ -1,5 +1,6 @@
 package com.ithopeschool.projectbe.domain.session;
 
+import com.ithopeschool.projectbe.domain.card.Card;
 import com.ithopeschool.projectbe.domain.card.CardRepository;
 import com.ithopeschool.projectbe.domain.care.MissReason;
 import com.ithopeschool.projectbe.domain.care.Stage4Service;
@@ -117,6 +118,11 @@ public class StudySessionService {
     Long cardId = checkCard(userId, request.cardId());
     // 카드로 켠 공부 기록은 과목이 없어도 됩니다. (카드는 과목 대신 목표로 이어집니다, #222)
     Long subjectId = checkSubject(userId, kind, request.subjectId(), cardId != null);
+    // 과목을 안 보낸 카드 공부 기록이면 카드의 과목을 채웁니다. 과목별 공부 시간이 '기타' 로 묶이지 않게 하려는 것입니다. (#404)
+    // 보낸 과목이 있으면 그 과목이 먼저입니다. 노는 기록은 과목을 두지 않습니다.
+    if (subjectId == null && kind == PlanKind.STUDY && cardId != null) {
+      subjectId = subjectOfCard(userId, cardId);
+    }
     Long planId = checkPlan(userId, request.planId());
 
     // 내 기록 중에 시간이 겹치는 것이 있으면 거절합니다. (같은 시간을 두 번 세지 않도록)
@@ -184,10 +190,19 @@ public class StudySessionService {
       throw new ApiException(ErrorCode.CONFLICT, "이미 저장된 기록과 시간이 겹쳐요");
     }
 
-    // 카드로 켠 공부 기록이라 과목은 비어 있습니다.
+    // 카드로 켠 공부 기록이라 과목은 카드의 과목입니다. 카드에 과목이 없으면 비어 있습니다. (#404)
     StudySession session =
         new StudySession(
-            userId, null, startedAt, endedAt, 0, 0, null, targetMinutes, null, PlanKind.STUDY);
+            userId,
+            subjectOfCard(userId, myCardId),
+            startedAt,
+            endedAt,
+            0,
+            0,
+            null,
+            targetMinutes,
+            null,
+            PlanKind.STUDY);
     session.recordCard(myCardId, SessionMode.SELF_REPORT, false);
     session.recordPauses(List.of());
     if (endReport != null) {
@@ -379,6 +394,13 @@ public class StudySessionService {
       throw new ApiException(ErrorCode.NOT_FOUND, "카드를 찾을 수 없어요");
     }
     return id;
+  }
+
+  // 내 카드의 과목 번호를 돌려줍니다. 카드에 과목이 없으면 null 입니다. (#404)
+  // checkCard 로 내 카드인 것을 이미 확인한 번호를 받습니다.
+  // 과목을 지우면 카드의 과목도 비워지므로(SubjectService.delete) 여기서 나오는 과목은 늘 있는 내 과목입니다.
+  private Long subjectOfCard(Long userId, Long cardId) {
+    return cardRepository.findByIdAndUserId(cardId, userId).map(Card::getSubjectId).orElse(null);
   }
 
   // 일시정지 요청을 저장할 값으로 바꿉니다. 이유 태그가 7가지가 아니면 400 입니다. 빈 메모("")는 null 입니다.

@@ -97,6 +97,8 @@ public class SubjectService {
   // 왜 막나요? 계획·기록은 과목 번호(subjectId)로 과목을 가리킵니다. 과목만 지우면 가리킬 곳이 없어져서
   // 화면에서 "무슨 과목인지 모르는 기록" 이 됩니다. 기록을 같이 지우면 학생의 공부 기록이 사라집니다.
   // 지금 쓰는 과목이라도 이름이나 색은 바꿀 수 있습니다. (이 정책은 docs/API.md "과목" 에 적혀 있습니다)
+  //
+  // 카드는 막지 않습니다. 이 과목을 붙인 카드는 지우지 않고 과목만 비웁니다. ("과목 없음", 이슈 #404)
   @Transactional
   public void delete(Long id) {
     Long userId = currentUserProvider.getCurrentUserId();
@@ -110,6 +112,7 @@ public class SubjectService {
     if (subjectRepository.hasRoutines(userId, id)) {
       throw new ApiException(ErrorCode.CONFLICT, "이 과목으로 만든 루틴이 있어서 지울 수 없어요");
     }
+    subjectRepository.clearCardSubject(userId, id);
     subjectRepository.delete(subject);
   }
 

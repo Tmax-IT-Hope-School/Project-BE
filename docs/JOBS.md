@@ -151,7 +151,7 @@ URL 은 `https://project-be-mxxc.onrender.com/api/v1/jobs/<작업 이름>` 입�
 | `care-stages` | 매일 04:10 | **PR #331 이 main 에 배포된 뒤** | 모든 학생의 오늘 관리 단계 정하기 | `[관리 단계] 판정 n명` | 6-9 (#331) |
 | `calendar-alarm` | **10분마다** (:00 · :10 · :20 …) | **feat/calendar-alarm 이 main 에 배포되고, Neon 에 `17-calendar-alarms.sql` 을 실행한 뒤** | 구글 캘린더 일정 시작 10분 전에 푸시 | `[캘린더 알림] 보냄 n개 · 건너뜀 n개` | 6-11 |
 | `school-daily` | 매일 05:00 (학교가 많아지면 05:00 ~ 06:00 10분마다) | **feat/school-daily-crawl 이 main 에 배포된 뒤** | 학교마다 학사일정 · 급식 미리 받기 + 홈페이지 가정통신문 · 공지 제목 읽기 (`school-events` 일도 같이 함) | `[학교 하루 작업] 학교 n곳 중 n곳을 처리했어요. …` | 6-10 |
-| `variant-expire` | 매일 04:05 | **feat/variant-problems 가 main 에 배포되고 db/migrations/19 을 실행한 뒤** | 지난 날의 답하지 않은 변형 과제를 만료 | `[변형 만료] 기준 날짜=…, 마감된 과제 n개` | 6-12 |
+| `variant-expire` | 매일 04:05 | **feat/variant-problems 가 main 에 배포되고 db/migrations/22 를 실행한 뒤** | 지난 날의 답하지 않은 변형 과제를 만료 | `[변형 만료] 기준 날짜=…, 마감된 과제 n개` | 6-12 |
 | `variant-daily` | 매일 04:10 ~ 08:00, **10분마다** | 위와 같음 | 오늘 낼 변형 문제를 AI 로 만들고 과제로 배정 | `[변형 일일] 기준 날짜=…, 학생 n명, 새 과제 n개, 아직 준비 중 n개` | 6-12 |
 | `variant-weekly` | **매주 월요일** 04:10 ~ 08:00, 10분마다 | 위와 같음 | 지난주(월 ~ 일) 주간 심화 세트 만들기 (월요일이 아니면 아무것도 안 함) | `[변형 주간] … 주 세트: 대상 학생 n명, …` | 6-12 |
 

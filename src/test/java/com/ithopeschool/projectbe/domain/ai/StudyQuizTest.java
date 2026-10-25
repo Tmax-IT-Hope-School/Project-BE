@@ -12,7 +12,11 @@ class StudyQuizTest {
 
   private static StudyQuiz.Answer.Item item(
       String question, List<String> choices, Integer answerIndex, String explanation) {
-    return new StudyQuiz.Answer.Item(question, choices, answerIndex, explanation);
+    return new StudyQuiz.Answer.Item(question, choices, answerIndex, explanation, null);
+  }
+
+  private static StudyQuiz.Answer.Item withPassage(String question, String passage) {
+    return new StudyQuiz.Answer.Item(question, CHOICES, 0, "해설", passage);
   }
 
   private static final List<String> CHOICES = List.of("0", "1", "∞", "없다");
@@ -59,7 +63,36 @@ class StudyQuizTest {
             3);
 
     assertThat(questions)
-        .containsExactly(new StudyQuiz.Question("lim (n→∞) 1/n 의 값은?", CHOICES, 0, "0 에 가까워져."));
+        .containsExactly(
+            new StudyQuiz.Question("lim (n→∞) 1/n 의 값은?", CHOICES, 0, "0 에 가까워져.", null));
+  }
+
+  @Test
+  @DisplayName("지문은 앞뒤 공백을 지우고 2000자에서 자르며, 비었거나 깎아내리는 말이 있으면 지문만 비우고 문제는 남긴다")
+  void cleansPassage() {
+    List<StudyQuiz.Question> questions =
+        StudyQuiz.from(
+            answer(
+                withPassage("지문 있음", "  봄이 오면 산에 들에 진달래 피네.  "),
+                withPassage("긴 지문", "가".repeat(2100)),
+                withPassage("빈 지문", "   "),
+                withPassage("나쁜 말 지문", "넌 진짜 한심해"),
+                withPassage("지문 없음", null)),
+            5);
+
+    assertThat(questions)
+        .extracting(StudyQuiz.Question::passage)
+        .containsExactly("봄이 오면 산에 들에 진달래 피네.", "가".repeat(2000), null, null, null);
+  }
+
+  @Test
+  @DisplayName("AI 답 모양에 passage(문자열 또는 null)가 있고, 지침에 지문을 그대로 옮기라는 규칙이 있다")
+  void schemaAndInstructionsHavePassage() {
+    AiQuestion question =
+        StudyQuiz.question(new StudyQuizRequest("국어 비문학", null, null, null, null));
+
+    assertThat(question.schema().toString()).contains("passage");
+    assertThat(question.instructions()).contains("passage").contains("그대로 옮겨");
   }
 
   @Test
@@ -111,5 +144,17 @@ class StudyQuizTest {
     assertThat(StudyQuiz.from(new StudyQuiz.Answer(false, false, List.of()), 3)).isNull();
     assertThat(StudyQuiz.from(new StudyQuiz.Answer(false, false, null), 3)).isNull();
     assertThat(StudyQuiz.from(null, 3)).isNull();
+  }
+
+  @Test
+  @DisplayName("단원은 앞뒤 빈칸을 지워 쓰고, 비었거나 30자를 넘으면 null (통계 탭)")
+  void unitOf() {
+    assertThat(StudyQuiz.unitOf(new StudyQuiz.Answer(false, false, " 함수 ", List.of())))
+        .isEqualTo("함수");
+    assertThat(StudyQuiz.unitOf(new StudyQuiz.Answer(false, false, " ", List.of()))).isNull();
+    assertThat(StudyQuiz.unitOf(new StudyQuiz.Answer(false, false, "가".repeat(31), List.of())))
+        .isNull();
+    assertThat(StudyQuiz.unitOf(new StudyQuiz.Answer(false, false, List.of()))).isNull();
+    assertThat(StudyQuiz.unitOf(null)).isNull();
   }
 }

@@ -87,6 +87,11 @@ public class Card {
   // ⚠️ 목표 테이블(goals, 이슈 #221)이 아직 없어서 지금은 번호만 적고, 그 목표가 있는지는 검사하지 않습니다.
   private Long goalId;
 
+  // 어떤 과목의 카드인지(subjects.id). 없으면 "과목 없음" 입니다. (이슈 #404)
+  // 카드로 켠 공부 기록에 과목을 안 보내면 이 과목을 채웁니다. 그래야 과목별 공부 시간이 '기타' 로 묶이지 않습니다.
+  // goalId 처럼 번호만 적고 DB 외래 키는 걸지 않았습니다. 과목을 지우면 SubjectService 가 이 칸을 비웁니다.
+  private Long subjectId;
+
   // 우선순위. 절대(ABSOLUTE) / 유연(FLEXIBLE, 기본)
   @Enumerated(EnumType.STRING)
   @Column(nullable = false, length = 10)
@@ -256,6 +261,11 @@ public class Card {
   // 연결한 목표를 바꿉니다. null 이면 "목표 없음" 입니다.
   public void changeGoalId(Long goalId) {
     this.goalId = goalId;
+  }
+
+  // 과목을 바꿉니다. null 이면 "과목 없음" 입니다. (내 과목인지는 Service 가 먼저 검사합니다)
+  public void changeSubjectId(Long subjectId) {
+    this.subjectId = subjectId;
   }
 
   // 우선순위를 바꿉니다.

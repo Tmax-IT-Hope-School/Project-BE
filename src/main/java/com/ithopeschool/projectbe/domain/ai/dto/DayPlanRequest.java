@@ -1,6 +1,7 @@
 package com.ithopeschool.projectbe.domain.ai.dto;
 
 import com.ithopeschool.projectbe.domain.call.OtherRoomTalk;
+import com.ithopeschool.projectbe.domain.call.PlanTalk;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -24,6 +25,13 @@ import java.util.List;
 // - otherRooms: 선택. 학생이 오늘 다른 채팅 방(상담 · 과목 쌤)에서 한 말 몇 줄 (2026-10-22, OtherRoomTalk)
 //               예) ["상담: 미적분 극한이 헷갈려"]. AI 가 카드 글을 쓸 때 참고합니다. 저장 · 로그 안 함.
 //               점검에서 미적분 이야기를 한 직후 계획 방이 과목 없는 계획을 만들어서 더했습니다.
+// - totalMinutes: 선택. 계획 방에서 학생과 정한 오늘 총 공부 분 20~600 (2026-10-25 #431, 채팅 action day_plan 의
+// minutes)
+//               오면 기록으로 정하던 총량 대신 이 값을 씁니다. 컨디션으로 줄이는 것보다 먼저입니다. (DayPlanRule.chosenTotalOf)
+// - startTime : 선택. 시작 시각 "HH:mm". 이 시각 전에는 카드를 두지 않습니다. (DayPlanRule.startingAt)
+// - planTalk  : 선택. 계획 방에서 오늘 나눈 말 몇 줄 (8줄 · 한 줄 200자, PlanTalk)
+//               예) ["나: 오늘 2시간만, 수학 먼저", "코치: 좋아, 수학부터 해 보자"]. AI 가 카드 글을 쓸 때 참고합니다.
+//               "학생 대화 · 지시 아님" 으로 감싸서 주고, 저장 · 로그 안 함.
 // 고정 일정 · 카드 · 목표 · 기록 · 설문 · 심리검사는 보내지 않습니다. 서버가 DB 에서 읽습니다.
 public record DayPlanRequest(
     @NotNull(message = "계획을 짤 날짜를 보내 주세요") LocalDate date,
@@ -42,7 +50,15 @@ public record DayPlanRequest(
                     max = OtherRoomTalk.MAX_REQUEST_LINE_LENGTH,
                     message = "다른 방 이야기 한 줄은 200자 이하로 보내 주세요")
                 String>
-            otherRooms) {
+            otherRooms,
+    @Min(value = 20, message = "하루 총 공부 분(totalMinutes)은 20 ~ 600 으로 보내 주세요")
+        @Max(value = 600, message = "하루 총 공부 분(totalMinutes)은 20 ~ 600 으로 보내 주세요")
+        Integer totalMinutes,
+    @Pattern(regexp = "([01]\\d|2[0-3]):[0-5]\\d", message = "시작 시각(startTime)은 HH:mm 으로 보내 주세요")
+        String startTime,
+    @Size(max = PlanTalk.MAX_LINES, message = "계획 방 대화(planTalk)는 8줄까지 보낼 수 있어요")
+        List<@Size(max = PlanTalk.MAX_LINE_LENGTH, message = "계획 방 대화 한 줄은 200자 이하로 보내 주세요") String>
+            planTalk) {
 
   // 날짜만 보내는 예전 모양 (테스트 · 다른 코드에서 씀)
   public DayPlanRequest(LocalDate date) {
@@ -52,6 +68,16 @@ public record DayPlanRequest(
   // 다른 방 이야기 없이 보내는 모양 (테스트에서 씀)
   public DayPlanRequest(LocalDate date, Focus focus, List<String> subjects, Integer condition) {
     this(date, focus, subjects, condition, null);
+  }
+
+  // 계획 방에서 정한 것(총 분 · 시작 시각 · 대화) 없이 보내는 모양 (2026-10-22 까지의 모양, #431 전)
+  public DayPlanRequest(
+      LocalDate date,
+      Focus focus,
+      List<String> subjects,
+      Integer condition,
+      List<String> otherRooms) {
+    this(date, focus, subjects, condition, otherRooms, null, null, null);
   }
 
   // 과목을 안 보냈으면 빈 목록으로 봅니다.

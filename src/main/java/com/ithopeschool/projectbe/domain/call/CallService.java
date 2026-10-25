@@ -1,5 +1,6 @@
 package com.ithopeschool.projectbe.domain.call;
 
+import com.ithopeschool.projectbe.domain.ai.DayPlanService;
 import com.ithopeschool.projectbe.domain.auth.TokenHasher;
 import com.ithopeschool.projectbe.domain.bias.BiasQuestion;
 import com.ithopeschool.projectbe.domain.bias.CognitiveBias;
@@ -52,6 +53,12 @@ import org.springframework.stereotype.Service;
 //      오늘이 무너지기 쉬운 날이면 대본에 "표시" 를 넣습니다. (RiskService.levelOn: 위험 예측 이슈 #49. 저장하지 않고 지금 기록으로 계산)
 //      대본 끝에 시험 · 목표 · 가입 심리검사를 "[기록에서 꺼낸 것]" 으로 붙입니다. 위로하는 통화에서는 붙이지 않습니다. (CallContext)
 //      오늘 끝낸 공부가 있으면 "[방금 공부한 것]" 을 붙여 확인 통화로 시작합니다. 위로하는 통화에서는 붙이지 않습니다.
+//      음성 통화는 코드가 고른 주제 하나만 깊게 이야기합니다. (CallTopic, 2026-10-25 #434 "통화도 마찬가지 — 계속 물어봄")
+//        FE 카드의 조건부 모듈(callModule, BE #28)이 오면 그 모듈이 주제이고, 안전 브레이크 · 회복 모드면 위로하는 통화(0)로 합니다.
+//        생각 습관이 오늘 주제가 아니면 질문을 묻지 않으니, 통화 기록에도 "물어본 질문" 을 남기지 않습니다.
+//      음성 통화 대본 끝에는 계획 방(#431)과 같은 "[오늘 쓸 수 있는 시간]"(DayPlanService.todayTime)과
+//      FE 가 보낸 오늘 채팅 이야기 "[다른 방에서 오늘 한 이야기]"(OtherRoomTalk.callSection)를 붙입니다. 학원 · 빈 시간 · 오늘 카드를 또
+// 묻지 않게.
 //   7. OpenAI 에서 그 대본이 묶인 임시 키를 받는다 (못 받으면 503)
 //   8. 통화 기록을 한 줄 만들고, GPT 호출 기록에도 "통화 시작" 을 남긴 뒤, 임시 키와 기록 번호를 돌려준다
 //
@@ -91,6 +98,8 @@ public class CallService {
   private final CallContextLoader callContextLoader;
   // 오늘 끝낸 공부 (있으면 확인 통화로 시작, 2026-10-18)
   private final CheckCallService checkCallService;
+  // 음성 통화 대본의 [오늘 쓸 수 있는 시간] 칸 재료. 계획 방 채팅 · AI 하루 계획과 같은 계산입니다. (#434)
+  private final DayPlanService dayPlanService;
 
   public CallService(
       CurrentUserProvider currentUserProvider,
@@ -106,7 +115,8 @@ public class CallService {
       SafetyService safetyService,
       RiskService riskService,
       CallContextLoader callContextLoader,
-      CheckCallService checkCallService) {
+      CheckCallService checkCallService,
+      DayPlanService dayPlanService) {
     this.currentUserProvider = currentUserProvider;
     this.callKeyClient = callKeyClient;
     this.gptUsageGuard = gptUsageGuard;
@@ -121,6 +131,7 @@ public class CallService {
     this.riskService = riskService;
     this.callContextLoader = callContextLoader;
     this.checkCallService = checkCallService;
+    this.dayPlanService = dayPlanService;
   }
 
   public CallSessionResponse startSession(CallSessionRequest request) {
@@ -151,7 +162,7 @@ public class CallService {
     return new CallSessionResponse(
         key.get().value(),
         key.get().expiresAtMillis(),
-        // FE 는 이 시간이 되면 통화를 끊습니다. (통화 한 번 최대 길이, 처음 값 180초)
+        // FE 는 이 시간이 되면 통화를 끊습니다. (통화 한 번 최대 길이, 기본 300초. #434 에서 180 → 300)
         gptUsageGuard.maxCallSeconds(),
         String.valueOf(record.getId()));
   }
@@ -174,6 +185,26 @@ public class CallService {
       LocalDate today,
       CallChannel channel,
       CheckCall.Studied studied) {
+    return prepareScript(userId, request, now, today, channel, studied, null);
+  }
+
+  // 상담 채팅(ChatService)의 대본입니다. 방(room)에 따라 대본이 조금 달라집니다. (2026-10-25 #431)
+  // 계획 방(PLANNER)이면 [생각 습관] · [통화 순서] 를 넣지 않고(CallScript.chatInstructions),
+  // 생각 습관 질문도 고르지 않습니다(biasQuestion 은 null). 묻지 않은 질문이 "물어본 질문" 으로 기록에 남지 않게 하려는 것입니다.
+  Script prepareChatScript(
+      Long userId, CallSessionRequest request, Instant now, LocalDate today, ChatRoom room) {
+    return prepareScript(userId, request, now, today, CallChannel.CHAT, null, room);
+  }
+
+  // room 은 상담 채팅의 방입니다. 음성 통화 · 방을 모르는 채팅은 null 이고, 그러면 상담 방과 같습니다.
+  private Script prepareScript(
+      Long userId,
+      CallSessionRequest request,
+      Instant now,
+      LocalDate today,
+      CallChannel channel,
+      CheckCall.Studied studied,
+      ChatRoom room) {
     // 최근 2주의 내 통화 기록 (최근 것이 앞)
     List<CallRecord> recentCalls =
         callRecordRepository.findByUserIdAndCallDateGreaterThanEqualOrderByStartedAtDescIdDesc(
@@ -188,44 +219,73 @@ public class CallService {
         serverCard == null
             ? request.card()
             : CallCardLoader.withFocusFrom(serverCard, request.card());
+    // 음성 통화: FE 가 조건부 모듈로 안전 브레이크 · 회복 모드를 보내면 위로하는 통화(0)로 합니다. 채팅은 그대로입니다. (#28 · #434)
+    if (channel == CallChannel.VOICE) {
+      careLevel = CallScript.voiceCareLevel(careLevel, card);
+    }
 
     // 생각 습관 테스트 결과. 서버에 저장된 것이 있으면 그것을, 없으면 FE 가 보낸 것을 씁니다.
     CallScript.SelfReport selfReport = selfReportOf(userId, request, recentCalls);
 
+    // 계획 방은 생각 습관 질문을 하지 않아서 고르지 않습니다. (#431)
     BiasQuestion biasQuestion =
-        BiasQuestion.pick(
-            CallScript.isSupportive(careLevel, card),
-            card == null ? null : card.yesterdayMissReason(),
-            card == null ? null : card.weekStartDelayMinutes(),
-            foundBiasesOf(recentCalls),
-            askedQuestionKeysOf(recentCalls),
-            selfReport.biases());
+        room == ChatRoom.PLANNER
+            ? null
+            : BiasQuestion.pick(
+                CallScript.isSupportive(careLevel, card),
+                card == null ? null : card.yesterdayMissReason(),
+                card == null ? null : card.weekStartDelayMinutes(),
+                foundBiasesOf(recentCalls),
+                askedQuestionKeysOf(recentCalls),
+                selfReport.biases());
     // 오늘이 무너지기 쉬운 날이면 대본에 "표시" 로 넘깁니다. 이유(수면 등)는 넘기지 않고 위험 정도만 넘깁니다.
     RiskLevel riskLevel = riskService.levelOn(userId, today);
-    String instructions =
-        channel == CallChannel.CHAT
-            ? CallScript.chatInstructions(
-                careLevel,
-                request.maxHarshness(),
-                card,
-                biasQuestion,
-                pastCallsOf(recentCalls),
-                selfReport,
-                riskLevel)
-            : CallScript.instructions(
-                careLevel,
-                request.maxHarshness(),
-                card,
-                biasQuestion,
-                pastCallsOf(recentCalls),
-                selfReport,
-                riskLevel);
+    List<CallScript.PastCall> pastCalls = pastCallsOf(recentCalls);
+    boolean supportive = CallScript.isSupportive(careLevel, card);
+    String instructions;
+    if (channel == CallChannel.CHAT) {
+      instructions =
+          CallScript.chatInstructions(
+              careLevel,
+              request.maxHarshness(),
+              card,
+              biasQuestion,
+              pastCalls,
+              selfReport,
+              riskLevel,
+              room == null ? ChatRoom.COACH : room);
+    } else {
+      // 확인 통화인지는 [방금 공부한 것] 을 붙이는지와 같습니다. (위로하는 통화에는 붙이지 않음 — 아래)
+      boolean checkCall = studied != null && !supportive;
+      instructions =
+          CallScript.instructions(
+              careLevel,
+              request.maxHarshness(),
+              card,
+              biasQuestion,
+              pastCalls,
+              selfReport,
+              riskLevel,
+              new CallScript.VoiceCall(gptUsageGuard.maxCallSeconds(), checkCall));
+      // 생각 습관이 오늘 주제가 아니면 대본에 그 질문이 없으니, 통화 기록에 "물어본 질문" 으로 남기지 않습니다. (#434)
+      CallTopic topic = CallScript.voiceTopic(careLevel, card, biasQuestion, pastCalls, checkCall);
+      if (!topic.usesBiasQuestion()) {
+        biasQuestion = null;
+      }
+    }
     // 위로하는 통화에서는 시험 · 점수 이야기가 부담이 될 수 있어서 기록 칸을 붙이지 않습니다.
-    if (!CallScript.isSupportive(careLevel, card)) {
+    if (!supportive) {
       instructions += CallContext.section(callContextLoader.load(userId, today));
       instructions += CallScript.studiedSection(studied);
       // 기기에서 잰 집중도 · 폰 든 횟수 · 확인 문제 결과 (서버에 없는 값이라 늘 FE 값, 2026-10-18)
       instructions += CallScript.studySignalsSection(request.studySignals());
+    }
+    // 음성 통화: 오늘 쓸 수 있는 시간 · 오늘 채팅 이야기 (#434)
+    // 위로하는 통화에도 붙입니다. 계획 방(#431)처럼 대본의 위로 규칙("학생이 원할 때만 아주 작게")이 먼저라서입니다.
+    // 둘 다 저장 · 로그 안 함. 재료가 없으면 빈 글자라 대본이 바뀌지 않습니다.
+    if (channel == CallChannel.VOICE) {
+      instructions += PlannerTime.section(dayPlanService.todayTime());
+      instructions += OtherRoomTalk.callSection(request.otherRooms());
     }
     return new Script(instructions, biasQuestion);
   }

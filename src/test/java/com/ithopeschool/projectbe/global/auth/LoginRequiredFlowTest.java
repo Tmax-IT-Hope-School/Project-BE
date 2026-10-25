@@ -172,6 +172,18 @@ class LoginRequiredFlowTest {
           new Api("POST", "/api/v1/rest-days/{date}", "/api/v1/rest-days/2026-10-12", null),
           new Api(
               "GET", "/api/v1/rest-days", "/api/v1/rest-days?from=2026-10-01&to=2026-10-07", null),
+          // 퀴즈 결과 · 통계 탭 (2026-10-24)
+          new Api(
+              "POST",
+              "/api/v1/quiz-results",
+              "/api/v1/quiz-results",
+              "{\"subjectId\":1,\"unit\":\"함수\",\"correctCount\":1,\"totalCount\":2,"
+                  + "\"questionSeconds\":[30,40]}"),
+          new Api(
+              "GET",
+              "/api/v1/quiz-results/stats",
+              "/api/v1/quiz-results/stats?from=2026-10-01&to=2026-10-07",
+              null),
           // 카드 결과 (이슈 #229)
           new Api(
               "GET",
@@ -191,6 +203,9 @@ class LoginRequiredFlowTest {
               "/api/v1/weekly-goals",
               "/api/v1/weekly-goals?from=2026-10-01&to=2026-10-31",
               null),
+          // 주간 점수 (내 퀴즈 결과 · 계획 · 기록을 봅니다. 이슈 #412)
+          new Api(
+              "GET", "/api/v1/weekly-scores/{weekStart}", "/api/v1/weekly-scores/2026-10-19", null),
           // 달력 (내 카드 결과 · 체크인을 봅니다. 이슈 #235)
           new Api("GET", "/api/v1/calendar", "/api/v1/calendar?month=2026-10", null),
           // 관리 단계 (내 카드 결과 · 체크인으로 판정해 저장합니다. 이슈 #62)
@@ -302,6 +317,17 @@ class LoginRequiredFlowTest {
               "/api/v1/answer-checks/{id}/items/{itemId}",
               "/api/v1/answer-checks/1/items/1",
               "{\"result\":\"WRONG\"}"),
+          // 이번 주에 고른 것 (이슈 #406, 내가 고른 것은 본인만 봅니다)
+          new Api(
+              "PUT",
+              "/api/v1/weekly-picks/{weekStart}",
+              "/api/v1/weekly-picks/2026-10-26",
+              "{\"title\":\"폰을 다른 방에 두기\",\"hint\":\"손이 안 닿으면 덜 멈춰요\",\"skip\":false}"),
+          new Api(
+              "GET",
+              "/api/v1/weekly-picks",
+              "/api/v1/weekly-picks?from=2026-10-01&to=2026-10-31",
+              null),
           // AI 메시지
           new Api("GET", "/api/v1/messages", "/api/v1/messages", null),
           new Api("PATCH", "/api/v1/messages/{id}/read", "/api/v1/messages/1/read", null),
@@ -535,6 +561,12 @@ class LoginRequiredFlowTest {
               "/api/v1/ai/cards/from-photo",
               "/api/v1/ai/cards/from-photo",
               "{\"image\":\"data:image/jpeg;base64,AAAA\",\"date\":\"2026-10-18\"}"),
+          // 사진으로 증빙 적기 (방금 한 공부의 사진이라 학생의 정보입니다. Project-FE#670)
+          new Api(
+              "POST",
+              "/api/v1/ai/proof-from-photo",
+              "/api/v1/ai/proof-from-photo",
+              "{\"image\":\"data:image/jpeg;base64,AAAA\"}"),
           // 카드 폼 기본값 (내 카드 · 목표 · 기록을 봅니다. 이슈 #237)
           new Api(
               "POST", "/api/v1/ai/card-defaults", "/api/v1/ai/card-defaults", "{\"title\":\"수학\"}"),
