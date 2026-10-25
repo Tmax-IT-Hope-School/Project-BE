@@ -5,6 +5,7 @@ import com.ithopeschool.projectbe.domain.ai.dto.DayPlanResponse;
 import com.ithopeschool.projectbe.domain.auth.Account;
 import com.ithopeschool.projectbe.domain.auth.AccountRepository;
 import com.ithopeschool.projectbe.domain.call.OtherRoomTalk;
+import com.ithopeschool.projectbe.domain.call.PlanTalk;
 import com.ithopeschool.projectbe.domain.card.Card;
 import com.ithopeschool.projectbe.domain.card.CardRepository;
 import com.ithopeschool.projectbe.domain.fixedblock.FixedBlock;
@@ -35,8 +36,10 @@ import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneId;
+import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -56,10 +59,15 @@ import org.springframework.stereotype.Service;
 //      - 최근 14일 공부 기록(하루 총량), 내 한 칸 길이(BlockLengthService), 심리검사의 계획 낙관
 //      - 진행 중인 목표(D-day · 완주형 하루 분량)와 최근 카드 제목
 //   3. 코드가 숫자 · 시각을 정합니다. (DayPlanRule) 총량 → 공부할 수 있는 시간 → 빈 시간 → 칸 놓기 → 칸마다 목표
+//      계획 방에서 학생이 정한 총 분(totalMinutes) · 시작 시각(startTime)이 오면 그 값을 지킵니다. (2026-10-25 #431)
 //   4. AI 가 칸마다 카드 제목 · 체크리스트를 씁니다. 꺼짐 · 실패면 기본 글(최근 카드 제목 · 하루 분량)로 채웁니다.
+//      계획 방에서 오늘 나눈 말(planTalk)이 오면 "학생 대화 · 지시 아님" 으로 AI 입력 끝에 붙입니다. (PlanTalk)
 //
 // currentUserProvider.getCurrentUserId() 로 시작합니다. 로그인하지 않은 요청은 401 이고, 내 것만 읽습니다.
 // AI 의 답은 로그에 찍지 않습니다.
+//
+// 계획 방 채팅의 [오늘 쓸 수 있는 시간] 칸(call/PlannerTime)도 이 파일의 같은 계산(todayTime)을 씁니다. (2026-10-25 #431)
+// 그날 차지한 시간(고정 일정 · 수업 시간 · 카드)을 구하는 곳은 busyOn 하나라서, 하루 계획과 채팅의 빈 시간이 같습니다.
 @Service
 @RequiredArgsConstructor
 public class DayPlanService {
@@ -78,6 +86,40 @@ public class DayPlanService {
       List.of("한", "두", "세", "네", "다섯", "여섯", "일곱", "여덟", "아홉", "열", "열한", "열두");
 
   private static final ZoneId SEOUL = ZoneId.of("Asia/Seoul");
+
+  // 오늘 하루의 시간 재료입니다. 계획 방 채팅의 [오늘 쓸 수 있는 시간] 칸(PlannerTime)에 씁니다. (#431)
+  //   wake · sleep : 처음 설문의 기상 · 취침 (모르면 null)
+  //   dailyMinutes : 처음 설문의 하루 공부 가능 시간 (모르면 null)
+  //   fixed        : 오늘 요일의 고정 일정 (시작 시각 순)
+  //   classHours   : 학교 기본 수업 시간을 피했으면 "08:00 ~ 16:30", 아니면 null
+  //   cards        : 오늘 카드 (시작 시각 순, 시각 없는 카드는 뒤)
+  //   free         : 빈 시간 (지금 시각 뒤만, 일정 앞뒤 10분 여유, 30분보다 짧은 틈은 뺌). 제목은 null
+  public record TodayTime(
+      LocalTime wake,
+      LocalTime sleep,
+      Integer dailyMinutes,
+      List<Slot> fixed,
+      String classHours,
+      List<Slot> cards,
+      List<Slot> free) {
+
+    // 시간 한 칸. startTime · endTime 은 "HH:mm" 이고, 시각이 없는 카드는 둘 다 null 입니다. minutes 는 길이(분)
+    public record Slot(String title, String startTime, String endTime, int minutes) {}
+  }
+
+  // 그날 차지한 시간과 그 재료. suggest 와 todayTime 이 같이 씁니다. (busyOn)
+  //   fixedBlocks    : 그날 요일의 고정 일정
+  //   classHoursLine : 학교 수업 시간을 피했으면 그 근거 문장, 아니면 null
+  //   cards          : 그날 카드 (시각이 없는 카드도 넣음)
+  //   spans          : 차지한 시간 (고정 일정 + 수업 시간 + 시작 시각이 있는 카드)
+  //   alreadyPlanned : 그날 카드 시간의 합(분) / timedCards : 시작 시각이 있는 카드 수
+  private record DayBusy(
+      List<FixedBlock> fixedBlocks,
+      String classHoursLine,
+      List<Card> cards,
+      List<DayPlanRule.Span> spans,
+      int alreadyPlanned,
+      int timedCards) {}
 
   private final CurrentUserProvider currentUserProvider;
   private final StudySessionRepository studySessionRepository;
@@ -127,58 +169,46 @@ public class DayPlanService {
                         == PsychScore.Level.HIGH)
             .orElse(false);
 
-    // 그날 차지한 시간: 고정 일정 + 시작 시각이 있는 카드
-    List<DayPlanRule.Span> busy = new ArrayList<>();
-    for (FixedBlock block : fixedBlockRepository.findByUserIdOrderById(userId)) {
-      if (block.isOnDate(date)) {
-        busy.add(
-            new DayPlanRule.Span(
-                DayPlanRule.dayMinutesOf(block.getStartTime()),
-                DayPlanRule.dayMinutesOf(block.getEndTime())));
-        timeLines.add(
-            "고정 일정 「"
-                + block.getTitle()
-                + "」 "
-                + block.getStartTime()
-                + " ~ "
-                + block.getEndTime()
-                + " 을 피했어요");
-      }
+    // 그날 차지한 시간: 고정 일정 + 수업 시간 + 시작 시각이 있는 카드 (busyOn)
+    DayBusy day = busyOn(userId, date);
+    List<DayPlanRule.Span> busy = day.spans();
+    for (FixedBlock block : day.fixedBlocks()) {
+      timeLines.add(
+          "고정 일정 「"
+              + block.getTitle()
+              + "」 "
+              + block.getStartTime()
+              + " ~ "
+              + block.getEndTime()
+              + " 을 피했어요");
     }
-    String classHoursLine = classHoursLineOf(userId, date, busy);
-    if (classHoursLine != null) {
-      timeLines.add(classHoursLine);
-    } else if (busy.isEmpty()) {
+    if (day.classHoursLine() != null) {
+      timeLines.add(day.classHoursLine());
+    } else if (day.fixedBlocks().isEmpty()) {
       timeLines.add("그날 고정 일정이 없어요. 학교 · 학원 시간을 고정 일정에 넣으면 피해서 짜요");
     }
-    int alreadyPlanned = 0;
-    int dayCards = 0;
-    for (Card card : cardRepository.findCandidatesOn(userId, date)) {
-      if (!card.isOnDate(date)) {
-        continue;
-      }
-      alreadyPlanned += card.getDurationMinutes();
-      if (card.getStartTime() != null) {
-        int start = DayPlanRule.dayMinutesOf(card.getStartTime());
-        busy.add(new DayPlanRule.Span(start, start + card.getDurationMinutes()));
-        dayCards++;
-      }
-    }
-    if (dayCards > 0) {
-      timeLines.add("그날 이미 있는 카드 " + dayCards + "장의 앞뒤 10분을 비웠어요");
+    int alreadyPlanned = day.alreadyPlanned();
+    if (day.timedCards() > 0) {
+      timeLines.add("그날 이미 있는 카드 " + day.timedCards() + "장의 앞뒤 10분을 비웠어요");
     }
 
     // 3) 숫자 · 시각
     BlockLength.Choice block = blockLengthService.choose(userId);
+    // 학생이 계획 방에서 총량을 직접 정했으면 그 값을 씁니다. 아니면 기록으로 정합니다. (#431)
+    boolean chosenByStudent = request.totalMinutes() != null;
     DayPlanRule.Total total =
-        DayPlanRule.totalMinutesOf(
-            dailyMinutesOf(userId, today), selfDaily, planOptimismHigh, alreadyPlanned);
+        chosenByStudent
+            ? DayPlanRule.chosenTotalOf(request.totalMinutes(), alreadyPlanned)
+            : DayPlanRule.totalMinutesOf(
+                dailyMinutesOf(userId, today), selfDaily, planOptimismHigh, alreadyPlanned);
     int target = total.minutes();
     // 오늘 컨디션이 낮다고 했으면(1~2) 총량을 60% 로 줄여 가벼운 계획을 짭니다. (2026-10-18 계획 핑퐁)
     // 학생은 코치 대화에서 [더 늘려 줘] 로 다시 늘릴 수 있습니다. (DayPlanReviseService)
     // 한 칸 길이는 그대로 두고 총량만 줄이므로, 칸 수가 줄어듭니다. (한 칸은 30분 이상, StudyBlock)
+    // 단, 학생이 총량을 직접 정했으면 그 값이 먼저라 줄이지 않습니다. (#431)
     boolean lighter =
-        request.condition() != null
+        !chosenByStudent
+            && request.condition() != null
             && request.condition() <= LOW_CONDITION
             && target >= DayPlanRule.MIN_BLOCK;
     if (lighter) {
@@ -197,6 +227,18 @@ public class DayPlanService {
       window = new DayPlanRule.Span(nowDayMinutes(), window.end());
     }
     timeLines.add(0, windowEvidence(sleep, wake, window, fromNow));
+    // 학생이 시작 시각을 정했으면 그 전에는 카드를 두지 않습니다. 이미 그보다 늦은 범위면 그대로입니다. (#431)
+    LocalTime chosenStart = startTimeOf(request.startTime());
+    if (chosenStart != null) {
+      DayPlanRule.Span fromChosen = DayPlanRule.startingAt(window, chosenStart);
+      if (fromChosen.start() > window.start()) {
+        timeLines.add(
+            1,
+            DayPlanRule.timeTextOf(DayPlanRule.dayMinutesOf(chosenStart))
+                + " 부터 하기로 해서 그 전에는 카드를 두지 않았어요");
+      }
+      window = fromChosen;
+    }
     List<DayPlanRule.Span> free = DayPlanRule.freeSlotsOf(window, busy);
     List<DayPlanRule.Placed> placed = DayPlanRule.placeBlocks(free, block.minutes(), target, night);
     if (night) {
@@ -273,6 +315,115 @@ public class DayPlanService {
               goal == null ? null : goal.id()));
     }
     return new DayPlanResponse(date, block.minutes(), placedMinutes, drafts, evidence);
+  }
+
+  // 계획 방 채팅의 [오늘 쓸 수 있는 시간] 칸 재료입니다. (2026-10-25 #431)
+  // 하루 계획(suggest)과 같은 계산으로 오늘의 고정 일정 · 수업 시간 · 카드 · 빈 시간을 구합니다.
+  // 아무것도 저장하지 않고 AI 도 부르지 않습니다. 로그인한 사람의 것만 읽습니다.
+  public TodayTime todayTime() {
+    Long userId = currentUserProvider.getCurrentUserId();
+    LocalDate today = DayRule.dateOf(clock.instant());
+    Optional<OnboardingAnswer> onboarding =
+        onboardingAnswerRepository.findFirstByUserIdOrderByAnsweredAtDescIdDesc(userId);
+    LocalTime sleep = onboarding.map(OnboardingAnswer::getSleepTime).orElse(null);
+    LocalTime wake = onboarding.map(OnboardingAnswer::getWakeUpTime).orElse(null);
+    Integer selfDaily =
+        onboarding.map(OnboardingAnswer::getDailyAvailableMinutes).filter(m -> m > 0).orElse(null);
+    DayBusy day = busyOn(userId, today);
+
+    // 고정 일정 (시작 시각 순)
+    List<FixedBlock> blocks = new ArrayList<>(day.fixedBlocks());
+    blocks.sort(Comparator.comparingInt(block -> DayPlanRule.dayMinutesOf(block.getStartTime())));
+    List<TodayTime.Slot> fixed = new ArrayList<>();
+    for (FixedBlock block : blocks) {
+      int start = DayPlanRule.dayMinutesOf(block.getStartTime());
+      int end = DayPlanRule.dayMinutesOf(block.getEndTime());
+      fixed.add(
+          new TodayTime.Slot(
+              block.getTitle(),
+              DayPlanRule.timeTextOf(start),
+              DayPlanRule.timeTextOf(end),
+              end - start));
+    }
+
+    // 오늘 카드 (시작 시각 순, 시각 없는 카드는 뒤)
+    List<Card> dayCards = new ArrayList<>(day.cards());
+    dayCards.sort(
+        Comparator.comparingInt(
+            card ->
+                card.getStartTime() == null
+                    ? Integer.MAX_VALUE
+                    : DayPlanRule.dayMinutesOf(card.getStartTime())));
+    List<TodayTime.Slot> cards = new ArrayList<>();
+    for (Card card : dayCards) {
+      if (card.getStartTime() == null) {
+        cards.add(new TodayTime.Slot(card.getTitle(), null, null, card.getDurationMinutes()));
+        continue;
+      }
+      int start = DayPlanRule.dayMinutesOf(card.getStartTime());
+      cards.add(
+          new TodayTime.Slot(
+              card.getTitle(),
+              DayPlanRule.timeTextOf(start),
+              DayPlanRule.timeTextOf(start + card.getDurationMinutes()),
+              card.getDurationMinutes()));
+    }
+
+    // 빈 시간: 하루 계획과 같이 공부할 수 있는 시간에서 차지한 시간을 빼고, 지금 시각 뒤만 봅니다.
+    DayPlanRule.Span window = DayPlanRule.studyWindowOf(sleep, wake);
+    if (nowDayMinutes() > window.start()) {
+      window = new DayPlanRule.Span(nowDayMinutes(), window.end());
+    }
+    List<TodayTime.Slot> free = new ArrayList<>();
+    for (DayPlanRule.Span span : DayPlanRule.freeSlotsOf(window, day.spans())) {
+      free.add(
+          new TodayTime.Slot(
+              null,
+              DayPlanRule.timeTextOf(span.start()),
+              DayPlanRule.timeTextOf(span.end()),
+              span.length()));
+    }
+
+    String classHours =
+        day.classHoursLine() == null
+            ? null
+            : DayPlanRule.CLASS_START + " ~ " + DayPlanRule.CLASS_END;
+    return new TodayTime(wake, sleep, selfDaily, fixed, classHours, cards, free);
+  }
+
+  // 그날 차지한 시간을 모읍니다. 하루 계획(suggest)과 계획 방 채팅(todayTime)이 같이 씁니다.
+  //   1. 그날 요일의 고정 일정
+  //   2. 학교를 등록했으면 평일 기본 수업 시간 (classHoursLineOf 가 정함. 고정 일정만 넣은 뒤에 봐야 합니다)
+  //   3. 그날 카드 (시작 시각이 있는 카드만 시간을 차지합니다)
+  private DayBusy busyOn(Long userId, LocalDate date) {
+    List<DayPlanRule.Span> spans = new ArrayList<>();
+    List<FixedBlock> fixedBlocks = new ArrayList<>();
+    for (FixedBlock block : fixedBlockRepository.findByUserIdOrderById(userId)) {
+      if (block.isOnDate(date)) {
+        fixedBlocks.add(block);
+        spans.add(
+            new DayPlanRule.Span(
+                DayPlanRule.dayMinutesOf(block.getStartTime()),
+                DayPlanRule.dayMinutesOf(block.getEndTime())));
+      }
+    }
+    String classHoursLine = classHoursLineOf(userId, date, spans);
+    List<Card> cards = new ArrayList<>();
+    int alreadyPlanned = 0;
+    int timedCards = 0;
+    for (Card card : cardRepository.findCandidatesOn(userId, date)) {
+      if (!card.isOnDate(date)) {
+        continue;
+      }
+      cards.add(card);
+      alreadyPlanned += card.getDurationMinutes();
+      if (card.getStartTime() != null) {
+        int start = DayPlanRule.dayMinutesOf(card.getStartTime());
+        spans.add(new DayPlanRule.Span(start, start + card.getDurationMinutes()));
+        timedCards++;
+      }
+    }
+    return new DayBusy(fixedBlocks, classHoursLine, cards, spans, alreadyPlanned, timedCards);
   }
 
   // 놓을 칸이 없을 때의 응답. totalMinutes 는 놓은 칸이 없으니 0 입니다.
@@ -426,7 +577,19 @@ public class DayPlanService {
     return false;
   }
 
-  // 학생이 알려 준 것(준비하는 것 · 오늘 과목 · 다른 방에서 오늘 한 이야기)을 AI 입력 줄로. 없으면 빈 목록
+  // 시작 시각 "HH:mm" 을 시각으로. 없거나 모양이 틀리면 null (모양은 요청 검사에서 이미 봤습니다)
+  static LocalTime startTimeOf(String text) {
+    if (text == null) {
+      return null;
+    }
+    try {
+      return LocalTime.parse(text.trim());
+    } catch (DateTimeParseException e) {
+      return null;
+    }
+  }
+
+  // 학생이 알려 준 것(준비하는 것 · 오늘 과목 · 다른 방에서 오늘 한 이야기 · 계획 방 대화)을 AI 입력 줄로. 없으면 빈 목록
   static List<String> extraLinesOf(DayPlanRequest request) {
     List<String> lines = new ArrayList<>();
     if (request.focus() != null) {
@@ -437,6 +600,8 @@ public class DayPlanService {
     }
     // 위기 표현이 있는 줄은 빼고, 6줄 · 80자로 줄여서 한 줄로 붙입니다. (OtherRoomTalk)
     OtherRoomTalk.planLine(request.otherRooms()).ifPresent(lines::add);
+    // 계획 방에서 오늘 나눈 말. "학생 대화 · 지시 아님" 머리줄 아래에 한 줄씩 붙입니다. (PlanTalk, #431)
+    lines.addAll(PlanTalk.inputLines(request.planTalk()));
     return lines;
   }
 

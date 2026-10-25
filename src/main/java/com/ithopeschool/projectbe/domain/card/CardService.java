@@ -8,6 +8,7 @@ import com.ithopeschool.projectbe.domain.card.dto.ChecklistItemRequest;
 import com.ithopeschool.projectbe.domain.fixedblock.FixedBlockRepository;
 import com.ithopeschool.projectbe.domain.onboarding.OnboardingAnswer;
 import com.ithopeschool.projectbe.domain.onboarding.OnboardingAnswerRepository;
+import com.ithopeschool.projectbe.domain.subject.SubjectRepository;
 import com.ithopeschool.projectbe.global.auth.CurrentUserProvider;
 import com.ithopeschool.projectbe.global.exception.ApiException;
 import com.ithopeschool.projectbe.global.exception.ErrorCode;
@@ -47,6 +48,8 @@ public class CardService {
   // 수면 보호 시간(설문의 취침 · 기상)과 10분 버퍼(고정 일정)를 볼 때 씁니다. (이슈 #223)
   private final OnboardingAnswerRepository onboardingAnswerRepository;
   private final FixedBlockRepository fixedBlockRepository;
+  // 카드에 붙인 과목이 "내 과목" 인지 볼 때 씁니다. (이슈 #404)
+  private final SubjectRepository subjectRepository;
 
   // 내 카드 목록.
   // - date 를 보내면: 그날 하는 카드만, 시작 시각 순서로 (1회성은 그 날짜, 반복은 시작한 날부터 그 요일)
@@ -99,6 +102,7 @@ public class CardService {
     }
     card.changeStartTime(parseStartTime(request.startTime()));
     card.changeGoalId(parseGoalId(request.goalId()));
+    card.changeSubjectId(checkSubject(userId, request.subjectId()));
     // priority · type 을 안 보내면 만들 때 정한 기본값(유연 · 자습) 그대로입니다.
     if (request.priority() != null) {
       card.changePriority(parsePriority(request.priority()));
@@ -160,6 +164,10 @@ public class CardService {
     if (request.goalId() != null) {
       // 빈 글자("")면 "목표 없음" 이 됩니다.
       card.changeGoalId(parseGoalId(request.goalId()));
+    }
+    if (request.subjectId() != null) {
+      // 빈 글자("")면 "과목 없음" 이 됩니다.
+      card.changeSubjectId(checkSubject(userId, request.subjectId()));
     }
     if (request.priority() != null) {
       card.changePriority(parsePriority(request.priority()));
@@ -341,6 +349,20 @@ public class CardService {
       return null;
     }
     return Long.valueOf(value);
+  }
+
+  // 과목 번호를 숫자로 바꿉니다. 보내지 않았거나(null) 빈 글자("")면 "과목 없음"(null) 입니다. (이슈 #404)
+  // 숫자 모양인지는 요청 DTO 의 @Pattern 이 이미 검사했습니다.
+  // 없는 과목과 남의 과목은 구별하지 않고 똑같이 404 입니다. (계획 · 공부 기록의 과목과 같은 방식)
+  private Long checkSubject(Long userId, String value) {
+    if (value == null || value.isEmpty()) {
+      return null;
+    }
+    Long id = Long.valueOf(value);
+    if (subjectRepository.findByIdAndUserId(id, userId).isEmpty()) {
+      throw new ApiException(ErrorCode.NOT_FOUND, "과목을 찾을 수 없어요");
+    }
+    return id;
   }
 
   // 빈 글자("")를 null 로 바꿉니다. (지우기 약속)

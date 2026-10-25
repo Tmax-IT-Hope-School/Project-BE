@@ -1,6 +1,9 @@
 package com.ithopeschool.projectbe.domain.call.dto;
 
+import com.ithopeschool.projectbe.domain.call.CallModule;
 import com.ithopeschool.projectbe.domain.call.ChatRoom;
+import com.ithopeschool.projectbe.domain.call.OtherRoomTalk;
+import com.ithopeschool.projectbe.domain.care.MissReason;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -17,6 +20,7 @@ import java.util.List;
 // ⚠️ 카드에는 숫자와 정해진 분류값만 담습니다. 계획 내용·일기·이름 같은 글 원문은 받지 않습니다.
 //    그래서 모든 값의 범위와 모양을 좁게 정해 두었습니다. (이 값들이 AI 의 지침에 들어가기 때문입니다)
 //    예외: 공부 신호(StudySignals)의 "틀린 확인 문제 주제" 는 30자 · 3개짜리 글입니다. 이유는 StudySignals 주석.
+//    예외: 다른 방 이야기(otherRooms)는 학생이 오늘 채팅 방에서 쓴 말 몇 줄입니다. 이유는 아래 칸 주석. (#434)
 public record CallSessionRequest(
     // 오늘의 관리 강도. 0 회복 · 1 당근 · 2 넛지 · 3 심리적 채찍 · 4 강제적 채찍(말투는 3 과 같게 씁니다)
     @NotNull(message = "오늘의 관리 강도(careLevel)를 보내 주세요")
@@ -57,7 +61,19 @@ public record CallSessionRequest(
     @Pattern(regexp = ROOMS, message = "방(room)은 COACH · PLANNER · TUTOR 중 하나예요") String room,
     // 공부 신호: 기기에만 있는 최근 7일 집중도 · 폰 든 횟수 · 확인 문제 결과 (2026-10-18, StudySignals)
     // 통화와 채팅 둘 다 씁니다. 없으면 null 이고, 그러면 대본에 [공부 신호] 칸이 없습니다.
-    @Valid StudySignals studySignals) {
+    @Valid StudySignals studySignals,
+    // 다른 방 이야기 (2026-10-25 #434, 음성 통화만): 학생이 오늘 채팅 방에서 쓴 말 몇 줄. "방 이름: 말" 모양입니다.
+    //   ["계획: 오늘 2시간만 할래", "과목 쌤: 곱의 미분법 알려 줘"]
+    // 오늘 채팅에서 정한 것을 통화에서 또 묻지 않게, 통화 대본 끝 [다른 방에서 오늘 한 이야기] 칸에 넣습니다. (OtherRoomTalk.callSection)
+    // 모양은 채팅 말 보내기(ChatMessageRequest.otherRooms)와 같습니다. 12줄 · 한 줄 200자까지 받고, 쓸 때는 6줄 · 80자로 줄입니다.
+    // 저장 · 로그 안 함. 위기 표현이 있는 줄은 넣지 않습니다. 채팅 열기(POST /chats)는 이 칸을 쓰지 않습니다. 없으면 null
+    @Size(max = 12, message = "다른 방 이야기(otherRooms)는 12줄까지 보낼 수 있어요")
+        List<
+                @Size(
+                    max = OtherRoomTalk.MAX_REQUEST_LINE_LENGTH,
+                    message = "다른 방 이야기 한 줄은 200자 이하로 보내 주세요")
+                String>
+            otherRooms) {
 
   // 받을 수 있는 방 이름들입니다. ChatRoom 에 방을 더하면 여기에도 더해야 합니다. (ChatRoomTest 가 확인)
   // 맨 끝의 GOAL_MATE 는 예전 이름이라 받기만 하고 PLANNER 로 바꿉니다. (ChatRoom.from)
@@ -98,6 +114,28 @@ public record CallSessionRequest(
         selfReportedWeaknesses,
         about,
         room,
+        null);
+  }
+
+  // 다른 방 이야기 없이 보내는 모양 (채팅 · 테스트에서 씀, #434 전의 모양)
+  public CallSessionRequest(
+      Integer careLevel,
+      Integer maxHarshness,
+      Card card,
+      List<String> selfReportedBiases,
+      List<String> selfReportedWeaknesses,
+      ChatAbout about,
+      String room,
+      StudySignals studySignals) {
+    this(
+        careLevel,
+        maxHarshness,
+        card,
+        selfReportedBiases,
+        selfReportedWeaknesses,
+        about,
+        room,
+        studySignals,
         null);
   }
 
@@ -167,5 +205,98 @@ public record CallSessionRequest(
       // 어제 집중 모드를 스스로 푼 횟수 (설정·안전 브레이크 때문에 저절로 풀린 것은 세지 않습니다)
       @Min(value = 0, message = "yesterdayUnlockCount 는 0 ~ 50 이에요")
           @Max(value = 50, message = "yesterdayUnlockCount 는 0 ~ 50 이에요")
-          Integer yesterdayUnlockCount) {}
+          Integer yesterdayUnlockCount,
+      // ---- 지난 통화 이후 (FE src/lib/callCard.ts 의 SinceLastCallFields, FE #414 · BE #28. 받기 시작
+      // 2026-10-25 #434) ----
+      // 위의 칸과 달리 범위를 벗어나거나 모르는 글자면 400 대신 null(모름)로 바꿔 받습니다. (아래 compact constructor)
+      // FE 가 이미 보내던 칸이라, 모양이 조금 달라도 통화 자체가 막히지 않게 하려는 것입니다. 대본에는 아는 값만 들어갑니다.
+      // 지난 통화가 끝난 뒤 몇 시간 (0 ~ 8760). 통화한 적이 없으면 null → FE 는 최근 24시간으로 셉니다
+      Integer hoursSinceLastCall,
+      // 지난 통화 이후 실행한 카드 수 (0 ~ 50)
+      Integer doneCardCount,
+      // 실행한 카드의 평균 실행률 (0 ~ 100). 실행한 카드가 없으면 null
+      Integer cardRunRate,
+      // 미루거나 못 한 카드 수 (0 ~ 50)
+      Integer missedCardCount,
+      // 그중 아직 미루기 · 실패를 고르지 않은 카드 수 (0 ~ 50). 통화에서 원인 · 나누기 · 쉬기를 정합니다
+      Integer unhandledCardCount,
+      // 미실행 원인 1위. MissReason 글자(tired · event · phone · tooMuch · unwilling · sick ·
+      // procrastinated · etc)
+      String mainMissCause,
+      // 다음 통화까지(앞으로 24시간) 할 카드 수 (0 ~ 50)
+      Integer nextCardCount,
+      // 그중 절대(미룰 수 없는) 카드 수 (0 ~ 50)
+      Integer nextAbsoluteCardCount,
+      // 오늘 감정 태그를 안 골랐으면 true (결산 전에 기분을 한 번 묻습니다)
+      Boolean emotionTagsMissing,
+      // 이번 통화에 넣을 조건부 모듈 하나 (CallModule 의 글자). 없으면 null
+      String callModule) {
+
+    // 지난 통화 뒤 시간 · 카드 수 · 실행률의 범위
+    public static final int MAX_HOURS_SINCE_LAST_CALL = 8760;
+    public static final int MAX_CARD_COUNT = 50;
+
+    // "지난 통화 이후" 칸을 정리합니다. 범위 밖 숫자 · 모르는 글자는 null(모름)입니다. 위의 옛 칸은 그대로 둡니다.
+    //   doneCardCount 51 → null / cardRunRate -1 → null / mainMissCause "lazy" → null / callModule
+    // "quiz" → null
+    public Card {
+      hoursSinceLastCall = inRangeOrNull(hoursSinceLastCall, MAX_HOURS_SINCE_LAST_CALL);
+      doneCardCount = inRangeOrNull(doneCardCount, MAX_CARD_COUNT);
+      cardRunRate = inRangeOrNull(cardRunRate, 100);
+      missedCardCount = inRangeOrNull(missedCardCount, MAX_CARD_COUNT);
+      unhandledCardCount = inRangeOrNull(unhandledCardCount, MAX_CARD_COUNT);
+      mainMissCause = MissReason.fromValue(mainMissCause) == null ? null : mainMissCause;
+      nextCardCount = inRangeOrNull(nextCardCount, MAX_CARD_COUNT);
+      nextAbsoluteCardCount = inRangeOrNull(nextAbsoluteCardCount, MAX_CARD_COUNT);
+      callModule = CallModule.from(callModule).isPresent() ? callModule : null;
+    }
+
+    // "지난 통화 이후" 칸 없이 만드는 모양 (서버 카드 · 테스트 · #434 전의 FE). 새 칸은 모두 null(모름)입니다.
+    public Card(
+        Integer yesterdayStudyMinutes,
+        Integer yesterdayPlanMinutes,
+        String yesterdayMissReason,
+        Integer todayPlanCount,
+        Integer todayPlanMinutes,
+        String todayFirstStart,
+        Integer weekPlanRate,
+        Integer weekCompletionRate,
+        Integer weekStartDelayMinutes,
+        List<Integer> recentMoods,
+        Integer streakDays,
+        Integer yesterdayAwayCount,
+        Integer yesterdayAwayPeakHour,
+        Integer yesterdayUnlockCount) {
+      this(
+          yesterdayStudyMinutes,
+          yesterdayPlanMinutes,
+          yesterdayMissReason,
+          todayPlanCount,
+          todayPlanMinutes,
+          todayFirstStart,
+          weekPlanRate,
+          weekCompletionRate,
+          weekStartDelayMinutes,
+          recentMoods,
+          streakDays,
+          yesterdayAwayCount,
+          yesterdayAwayPeakHour,
+          yesterdayUnlockCount,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null);
+    }
+
+    // 0 ~ max 안이면 그대로, 아니면 null(모름)
+    private static Integer inRangeOrNull(Integer value, int max) {
+      return value == null || value < 0 || value > max ? null : value;
+    }
+  }
 }

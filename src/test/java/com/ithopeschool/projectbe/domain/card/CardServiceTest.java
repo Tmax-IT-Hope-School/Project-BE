@@ -17,6 +17,9 @@ import com.ithopeschool.projectbe.domain.fixedblock.FixedBlock;
 import com.ithopeschool.projectbe.domain.fixedblock.FixedBlockRepository;
 import com.ithopeschool.projectbe.domain.onboarding.OnboardingAnswer;
 import com.ithopeschool.projectbe.domain.onboarding.OnboardingAnswerRepository;
+import com.ithopeschool.projectbe.domain.subject.Subject;
+import com.ithopeschool.projectbe.domain.subject.SubjectColor;
+import com.ithopeschool.projectbe.domain.subject.SubjectRepository;
 import com.ithopeschool.projectbe.global.auth.CurrentUserProvider;
 import com.ithopeschool.projectbe.global.exception.ApiException;
 import com.ithopeschool.projectbe.global.exception.ErrorCode;
@@ -46,6 +49,7 @@ class CardServiceTest {
   private CardRepository cardRepository;
   private OnboardingAnswerRepository onboardingAnswerRepository;
   private FixedBlockRepository fixedBlockRepository;
+  private SubjectRepository subjectRepository;
   private CardService cardService;
 
   @BeforeEach
@@ -55,13 +59,21 @@ class CardServiceTest {
     // 설문(취침 · 기상)과 고정 일정은 기본으로 없습니다. 그러면 수면 보호는 00:00 ~ 06:00 입니다. (이슈 #223)
     onboardingAnswerRepository = mock(OnboardingAnswerRepository.class);
     fixedBlockRepository = mock(FixedBlockRepository.class);
+    // 내 과목은 3번 · 4번뿐이고, 그 밖의 번호는 없거나 남의 과목입니다. (이슈 #404)
+    subjectRepository = mock(SubjectRepository.class);
+    given(subjectRepository.findByIdAndUserId(any(), any())).willReturn(Optional.empty());
+    given(subjectRepository.findByIdAndUserId(3L, ME))
+        .willReturn(Optional.of(new Subject(ME, "수학", SubjectColor.BLUE)));
+    given(subjectRepository.findByIdAndUserId(4L, ME))
+        .willReturn(Optional.of(new Subject(ME, "영어", SubjectColor.RED)));
     cardService =
         new CardService(
             currentUserProvider,
             cardRepository,
             Clock.fixed(NOW, ZoneId.of("UTC")),
             onboardingAnswerRepository,
-            fixedBlockRepository);
+            fixedBlockRepository,
+            subjectRepository);
     given(currentUserProvider.getCurrentUserId()).willReturn(ME);
     // 저장하면 DB 가 번호를 매겨 준 것처럼 돌려줍니다.
     given(cardRepository.save(any()))
@@ -108,13 +120,14 @@ class CardServiceTest {
         null,
         null,
         null,
+        null,
         null);
   }
 
   // 바꿀 칸이 하나도 없는 바꾸기 요청. 테스트마다 필요한 칸만 채워서 씁니다.
   private static CardUpdateRequest emptyUpdate() {
     return new CardUpdateRequest(
-        null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+        null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
   }
 
   private static void assertError(Runnable action, ErrorCode code, String message) {
@@ -216,6 +229,7 @@ class CardServiceTest {
             30,
             List.of(item("a", "50개"), item("b", "복습")),
             "12",
+            null,
             "absolute",
             "lecture",
             1,
@@ -282,6 +296,7 @@ class CardServiceTest {
                     null,
                     null,
                     null,
+                    null,
                     null)),
         ErrorCode.VALIDATION_ERROR,
         "반복 요일이 겹치지 않게 보내 주세요");
@@ -295,6 +310,7 @@ class CardServiceTest {
                     null,
                     60,
                     two,
+                    null,
                     null,
                     "urgent",
                     null,
@@ -315,6 +331,7 @@ class CardServiceTest {
                     null,
                     60,
                     two,
+                    null,
                     null,
                     null,
                     "SELF",
@@ -341,6 +358,7 @@ class CardServiceTest {
                     null,
                     null,
                     null,
+                    null,
                     new CardAlertRequest("push", 0, null),
                     null)),
         ErrorCode.VALIDATION_ERROR,
@@ -355,6 +373,7 @@ class CardServiceTest {
                     null,
                     60,
                     two,
+                    null,
                     null,
                     null,
                     null,
@@ -386,6 +405,7 @@ class CardServiceTest {
                 List.of(1, 3),
                 null,
                 90,
+                null,
                 null,
                 null,
                 "absolute",
@@ -421,8 +441,8 @@ class CardServiceTest {
         cardService.update(
             7L,
             new CardUpdateRequest(
-                null, null, List.of(), "", null, null, "", null, null, null, "", List.of(), null,
-                null));
+                null, null, List.of(), "", null, null, "", null, null, null, null, "", List.of(),
+                null, null));
 
     assertThat(changed.repeatDays()).isNull();
     assertThat(changed.startTime()).isNull();
@@ -444,6 +464,7 @@ class CardServiceTest {
             null,
             null,
             List.of(item("i2", "43쪽"), item(null, "새 항목")),
+            null,
             null,
             null,
             null,
@@ -482,6 +503,7 @@ class CardServiceTest {
             null,
             null,
             null,
+            null,
             null);
 
     assertError(
@@ -510,7 +532,7 @@ class CardServiceTest {
                 99L,
                 new CardUpdateRequest(
                     "x", null, null, null, null, null, null, null, null, null, null, null, null,
-                    null)),
+                    null, null)),
         ErrorCode.NOT_FOUND,
         "카드를 찾을 수 없어요");
     assertError(() -> cardService.delete(99L), ErrorCode.NOT_FOUND, "카드를 찾을 수 없어요");
@@ -528,6 +550,82 @@ class CardServiceTest {
     verify(cardRepository).delete(card);
   }
 
+  // ---- 과목 (이슈 #404) ----
+
+  // 과목만 고른 만들기 요청 (나머지는 꼭 있어야 하는 값만)
+  private static CardCreateRequest createWithSubject(String subjectId) {
+    return new CardCreateRequest(
+        "수학 문제집",
+        MON_OCT_12,
+        null,
+        "19:00",
+        60,
+        List.of(item(null, "42쪽")),
+        null,
+        subjectId,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null);
+  }
+
+  // 과목만 바꾸는 바꾸기 요청
+  private static CardUpdateRequest updateSubject(String subjectId) {
+    return new CardUpdateRequest(
+        null, null, null, null, null, null, null, subjectId, null, null, null, null, null, null,
+        null);
+  }
+
+  @Test
+  @DisplayName("내 과목을 붙여 만들면 저장되고 응답의 subjectId 는 글자다. 안 보내거나 \"\" 면 과목 없음(null)")
+  void createWithMySubject() {
+    CardResponse saved = cardService.create(createWithSubject("3"));
+    assertThat(saved.subjectId()).isEqualTo("3");
+
+    assertThat(cardService.create(createWithSubject(null)).subjectId()).isNull();
+    assertThat(cardService.create(createWithSubject("")).subjectId()).isNull();
+  }
+
+  @Test
+  @DisplayName("없는 과목이나 남의 과목을 붙이면 만들기 · 바꾸기 모두 404 이고 저장하지 않는다")
+  void othersSubjectIs404() {
+    assertError(
+        () -> cardService.create(createWithSubject("99")), ErrorCode.NOT_FOUND, "과목을 찾을 수 없어요");
+    verify(cardRepository, never()).save(any());
+
+    Card card = myCard(7L, "수학", MON_OCT_12, List.of());
+    card.changeSubjectId(3L);
+    given(cardRepository.findByIdAndUserId(7L, ME)).willReturn(Optional.of(card));
+    assertError(
+        () -> cardService.update(7L, updateSubject("99")), ErrorCode.NOT_FOUND, "과목을 찾을 수 없어요");
+    assertThat(card.getSubjectId()).isEqualTo(3L);
+  }
+
+  @Test
+  @DisplayName("바꾸기: 과목을 보내면 바뀌고, \"\" 면 비우고, 안 보내면(null) 그대로다")
+  void updateSubjectKeepsOrClears() {
+    Card card = myCard(7L, "수학", MON_OCT_12, List.of());
+    card.changeSubjectId(3L);
+    given(cardRepository.findByIdAndUserId(7L, ME)).willReturn(Optional.of(card));
+
+    assertThat(cardService.update(7L, updateSubject("4")).subjectId()).isEqualTo("4");
+
+    // 다른 칸만 바꾸면 과목은 그대로입니다.
+    CardResponse titleOnly =
+        cardService.update(
+            7L,
+            new CardUpdateRequest(
+                "수학 2권", null, null, null, null, null, null, null, null, null, null, null, null,
+                null, null));
+    assertThat(titleOnly.subjectId()).isEqualTo("4");
+
+    assertThat(cardService.update(7L, updateSubject("")).subjectId()).isNull();
+    assertThat(card.getSubjectId()).isNull();
+  }
+
   // ---- 수면 보호 · 10분 버퍼 (이슈 #223) ----
 
   // 시작 시각 · 길이만 정한 만들기 요청
@@ -539,6 +637,7 @@ class CardServiceTest {
         startTime,
         minutes,
         List.of(new ChecklistItemRequest(null, "42쪽")),
+        null,
         null,
         null,
         null,
@@ -588,12 +687,13 @@ class CardServiceTest {
 
     CardUpdateRequest titleOnly =
         new CardUpdateRequest(
-            "새 제목", null, null, null, null, null, null, null, null, null, null, null, null, null);
+            "새 제목", null, null, null, null, null, null, null, null, null, null, null, null, null,
+            null);
     assertThat(cardService.update(7L, titleOnly).title()).isEqualTo("새 제목");
 
     CardUpdateRequest longer =
         new CardUpdateRequest(
-            null, null, null, null, 90, null, null, null, null, null, null, null, null, null);
+            null, null, null, null, 90, null, null, null, null, null, null, null, null, null, null);
     assertThatThrownBy(() -> cardService.update(7L, longer))
         .isInstanceOf(ApiException.class)
         .hasMessage("수면 보호 시간(23:00~07:00)과 겹쳐요");

@@ -106,8 +106,26 @@ public class CallCardLoader {
 
   // 서버 카드에, 서버에 없는 값(나간 횟수 · 가장 자주 나간 시간대 · 집중 모드를 푼 횟수)만 FE 카드에서 옮겨 담습니다.
   // FE 카드가 없으면 그 세 칸은 비어 있습니다(모름).
+  // "지난 통화 이후" 칸(결산 · 카드 · 조건부 모듈, #28)도 FE 가 기기의 카드 기록으로 계산해서 FE 카드 값을 옮깁니다. (#434)
   public static CallSessionRequest.Card withFocusFrom(
       CallSessionRequest.Card serverCard, CallSessionRequest.Card feCard) {
+    if (feCard == null) {
+      return new CallSessionRequest.Card(
+          serverCard.yesterdayStudyMinutes(),
+          serverCard.yesterdayPlanMinutes(),
+          serverCard.yesterdayMissReason(),
+          serverCard.todayPlanCount(),
+          serverCard.todayPlanMinutes(),
+          serverCard.todayFirstStart(),
+          serverCard.weekPlanRate(),
+          serverCard.weekCompletionRate(),
+          serverCard.weekStartDelayMinutes(),
+          serverCard.recentMoods(),
+          serverCard.streakDays(),
+          null,
+          null,
+          null);
+    }
     return new CallSessionRequest.Card(
         serverCard.yesterdayStudyMinutes(),
         serverCard.yesterdayPlanMinutes(),
@@ -120,8 +138,18 @@ public class CallCardLoader {
         serverCard.weekStartDelayMinutes(),
         serverCard.recentMoods(),
         serverCard.streakDays(),
-        feCard == null ? null : feCard.yesterdayAwayCount(),
-        feCard == null ? null : feCard.yesterdayAwayPeakHour(),
-        feCard == null ? null : feCard.yesterdayUnlockCount());
+        feCard.yesterdayAwayCount(),
+        feCard.yesterdayAwayPeakHour(),
+        feCard.yesterdayUnlockCount(),
+        feCard.hoursSinceLastCall(),
+        feCard.doneCardCount(),
+        feCard.cardRunRate(),
+        feCard.missedCardCount(),
+        feCard.unhandledCardCount(),
+        feCard.mainMissCause(),
+        feCard.nextCardCount(),
+        feCard.nextAbsoluteCardCount(),
+        feCard.emotionTagsMissing(),
+        feCard.callModule());
   }
 }

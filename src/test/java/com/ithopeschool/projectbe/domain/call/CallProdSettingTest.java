@@ -39,9 +39,9 @@ class CallProdSettingTest {
     }
 
     @Test
-    @DisplayName("AI_CALL_MAX_SECONDS 를 넣지 않으면 통화 한 번 최대 길이는 180초(3분)다 (통화 수정 8)")
-    void callMaxSecondsDefaultsToThreeMinutes() {
-      assertThat(environment.getProperty("app.ai.call-max-seconds", Integer.class)).isEqualTo(180);
+    @DisplayName("AI_CALL_MAX_SECONDS 를 넣지 않으면 통화 한 번 최대 길이는 300초(5분)다 (#434 에서 180 → 300)")
+    void callMaxSecondsDefaultsToFiveMinutes() {
+      assertThat(environment.getProperty("app.ai.call-max-seconds", Integer.class)).isEqualTo(300);
     }
   }
 

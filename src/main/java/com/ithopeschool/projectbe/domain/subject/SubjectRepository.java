@@ -3,6 +3,7 @@ package com.ithopeschool.projectbe.domain.subject;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -31,4 +32,12 @@ public interface SubjectRepository extends JpaRepository<Subject, Long> {
   @Query(
       "select count(s) > 0 from StudySession s where s.userId = :userId and s.subjectId = :subjectId")
   boolean hasStudySessions(@Param("userId") Long userId, @Param("subjectId") Long subjectId);
+
+  // 이 과목을 붙인 내 카드들의 과목을 비웁니다. ("과목 없음" 으로) 비운 카드 수를 돌려줍니다. (이슈 #404)
+  // 과목을 지울 때 씁니다. 카드는 지우지 않고 과목만 비워서, 카드는 그대로 쓸 수 있습니다.
+  // 카드를 하나씩 불러와 고치지 않고 update 한 줄로 한 번에 바꿉니다. 값은 :이름 자리에 넘깁니다.
+  @Modifying
+  @Query(
+      "update Card c set c.subjectId = null where c.userId = :userId and c.subjectId = :subjectId")
+  int clearCardSubject(@Param("userId") Long userId, @Param("subjectId") Long subjectId);
 }

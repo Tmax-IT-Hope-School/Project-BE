@@ -49,6 +49,50 @@ class CallReviewTest {
   }
 
   @Test
+  @DisplayName("주제 하나만 깊게 한 통화(#434): 요약 · 약속만 있고 나머지가 null 이어도 그 칸들은 null 그대로 둔다")
+  void fewerQuestionsLeaveBlanks() {
+    // 지난 약속 이야기만 한 통화: 생각 습관 질문 · 어제 이유 · 기분 · 오늘 몇 분은 묻지 않았습니다.
+    CallReview review =
+        CallReview.from(
+            new CallReview.Raw(
+                false,
+                "지난 약속을 해 봤다고 함. 학원 끝나고 폰을 가방에 넣었다고 함.",
+                null,
+                null,
+                null,
+                null,
+                "학원에서 오면",
+                "폰을 가방에 넣는다",
+                true,
+                null,
+                null));
+
+    assertThat(review.crisis()).isFalse();
+    assertThat(review.summary()).isEqualTo("지난 약속을 해 봤다고 함. 학원 끝나고 폰을 가방에 넣었다고 함.");
+    assertThat(review.promiseIf()).isEqualTo("학원에서 오면");
+    assertThat(review.promiseThen()).isEqualTo("폰을 가방에 넣는다");
+    assertThat(review.promiseKept()).isTrue();
+    assertThat(review.foundBias()).isNull();
+    assertThat(review.foundEvidence()).isNull();
+    assertThat(review.actualQuestion()).isNull();
+    assertThat(review.missReason()).isNull();
+    assertThat(review.mood()).isNull();
+    assertThat(review.expectedMinutes()).isNull();
+    // 체크인으로 옮길 값은 약속 하나라서 체크인은 그 값만 채웁니다. (CallCheckIn)
+    assertThat(CallCheckIn.hasAnyValue(review)).isTrue();
+
+    // 약속도 정하지 못하고 요약만 남은 통화도 그대로 받습니다. (빈 칸은 null, 체크인에 옮길 것 없음)
+    CallReview summaryOnly =
+        CallReview.from(
+            new CallReview.Raw(
+                false, "오늘 계획 이야기를 했다고 함.", null, null, null, null, null, null, null, null, null));
+    assertThat(summaryOnly.summary()).isEqualTo("오늘 계획 이야기를 했다고 함.");
+    assertThat(summaryOnly.promiseIf()).isNull();
+    assertThat(summaryOnly.promiseKept()).isNull();
+    assertThat(CallCheckIn.hasAnyValue(summaryOnly)).isFalse();
+  }
+
+  @Test
   @DisplayName("목록에 없는 습관 이름이면 습관과 근거를 같이 비운다")
   void unknownBiasIsDropped() {
     CallReview review = CallReview.from(raw("요약", "LAZY", "근거", "A", "B"));

@@ -145,6 +145,61 @@ class CallRecordServiceTest {
   }
 
   @Test
+  @DisplayName("질문이 줄어든 통화(주제 하나, #434)는 정리 칸이 덜 채워져도 마무리되고, 빈 칸은 null 로 저장 · 응답한다")
+  void finishesACallWithFewerAnswers() {
+    // 지난 약속 이야기만 깊게 한 통화. 생각 습관 질문 · 어제 이유 · 기분 · 오늘 몇 분은 나오지 않았습니다.
+    CallRecord promiseCall =
+        new CallRecord(USER_ID, LocalDate.of(2026, 10, 14), NOW.minusSeconds(300), null);
+    ReflectionTestUtils.setField(promiseCall, "id", CALL_ID);
+    given(callRecordRepository.findByIdAndUserId(CALL_ID, USER_ID))
+        .willReturn(Optional.of(promiseCall));
+    given(callReviewClient.review(anyString(), anyString(), any()))
+        .willReturn(
+            Optional.of(
+                new CallReview.Raw(
+                    false,
+                    "지난 약속을 해 봤다고 함.",
+                    null,
+                    null,
+                    null,
+                    null,
+                    "학원에서 오면",
+                    "폰을 가방에 넣는다",
+                    true,
+                    null,
+                    null)));
+    given(checkInRepository.findByUserIdAndCheckInDate(USER_ID, LocalDate.of(2026, 10, 14)))
+        .willReturn(Optional.empty());
+
+    CallFinishResponse response =
+        service.finish(
+            CALL_ID,
+            new CallFinishRequest(
+                List.of(
+                    new Line("ai", "지난번에 학원 끝나면 폰을 가방에 넣기로 했잖아. 해 봤어?"),
+                    new Line("me", "응 어제 해 봤어"))));
+
+    assertThat(promiseCall.isFinished()).isTrue();
+    assertThat(promiseCall.getSummary()).isEqualTo("지난 약속을 해 봤다고 함.");
+    assertThat(promiseCall.getAskedBias()).isNull();
+    assertThat(promiseCall.getFoundBias()).isNull();
+    assertThat(promiseCall.getActualQuestion()).isNull();
+    assertThat(promiseCall.getMissReason()).isNull();
+    assertThat(promiseCall.getPromiseKept()).isTrue();
+    assertThat(response.bias()).isNull();
+    assertThat(response.missReason()).isNull();
+    assertThat(response.mood()).isNull();
+    assertThat(response.expectedMinutes()).isNull();
+    assertThat(response.promiseIf()).isEqualTo("학원에서 오면");
+    // 체크인에는 나온 값(약속)만 옮깁니다.
+    ArgumentCaptor<CheckIn> saved = ArgumentCaptor.forClass(CheckIn.class);
+    verify(checkInRepository).save(saved.capture());
+    assertThat(saved.getValue().getPromiseThen()).isEqualTo("폰을 가방에 넣는다");
+    assertThat(saved.getValue().getMood()).isNull();
+    assertThat(saved.getValue().getMissReason()).isNull();
+  }
+
+  @Test
   @DisplayName("GPT 에는 정리 지침·자막·칸 모양을 건넨다")
   void passesThePromptToGpt() {
     service.finish(CALL_ID, TRANSCRIPT);
