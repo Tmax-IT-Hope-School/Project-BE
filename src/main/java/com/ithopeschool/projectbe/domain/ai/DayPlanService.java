@@ -27,6 +27,8 @@ import com.ithopeschool.projectbe.domain.school.SchoolEventRepository;
 import com.ithopeschool.projectbe.domain.session.StudySession;
 import com.ithopeschool.projectbe.domain.session.StudySessionRepository;
 import com.ithopeschool.projectbe.domain.session.StudyTime;
+import com.ithopeschool.projectbe.domain.subject.Subject;
+import com.ithopeschool.projectbe.domain.subject.SubjectRepository;
 import com.ithopeschool.projectbe.global.auth.CurrentUserProvider;
 import com.ithopeschool.projectbe.global.exception.ApiException;
 import com.ithopeschool.projectbe.global.exception.ErrorCode;
@@ -42,6 +44,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -138,6 +141,8 @@ public class DayPlanService {
   // 학교를 등록했는지(수업 시간을 피할지)와 그날 학사일정(방학 · 휴업)을 봅니다.
   private final AccountRepository accountRepository;
   private final SchoolEventRepository schoolEventRepository;
+  // 내 과목. 계획 카드마다 과목을 붙이려고 읽습니다. (#457)
+  private final SubjectRepository subjectRepository;
 
   public DayPlanResponse suggest(DayPlanRequest request) {
     Long userId = currentUserProvider.getCurrentUserId();
@@ -304,29 +309,45 @@ public class DayPlanService {
               goal == null ? null : goal.pace()));
       fallbacks.add(fallbackOf(goal, myCards, recentTitles, i));
     }
+    // 내 과목 이름 → 번호. AI 가 칸마다 이 중에서 과목을 고릅니다. (#457)
+    Map<String, String> subjectIdsByName = new LinkedHashMap<>();
+    for (Subject subject : subjectRepository.findByUserIdOrderById(userId)) {
+      subjectIdsByName.putIfAbsent(subject.getName().trim(), String.valueOf(subject.getId()));
+    }
+    List<String> subjectNames = new ArrayList<>(subjectIdsByName.keySet());
     List<DayPlanPrompt.Text> texts =
         DayPlanPrompt.textsOf(
             aiClient
                 .ask(
                     userId,
                     GptUsageKind.ASSIST,
-                    DayPlanPrompt.question(date, blocks, recentTitles, extraLinesOf(request)),
+                    DayPlanPrompt.question(
+                        date, blocks, recentTitles, extraLinesOf(request), subjectNames),
                     DayPlanPrompt.Answer.class)
                 .orElse(null),
-            fallbacks);
+            fallbacks,
+            subjectNames);
 
     List<DayPlanResponse.Draft> drafts = new ArrayList<>();
     for (int i = 0; i < placed.size(); i++) {
       DayPlanRule.GoalInfo goal = rotation.isEmpty() ? null : rotation.get(i);
+      // 첫 칸 제목은 학생이 정한 그대로 둡니다. (AI 가 목표 이름으로 바꿔 쓰지 않게)
+      String title =
+          i == 0 && request.firstTask() != null ? request.firstTask() : texts.get(i).title();
+      // 과목: AI 가 고른 것 → 없으면 제목에 든 과목 이름 → 그래도 없으면 null (#457)
+      String subjectName =
+          texts.get(i).subject() != null
+              ? texts.get(i).subject()
+              : DayPlanRule.subjectInTitle(title, subjectNames);
       drafts.add(
           new DayPlanResponse.Draft(
               date,
               DayPlanRule.timeTextOf(placed.get(i).start()),
               placed.get(i).minutes(),
-              // 첫 칸 제목은 학생이 정한 그대로 둡니다. (AI 가 목표 이름으로 바꿔 쓰지 않게)
-              i == 0 && request.firstTask() != null ? request.firstTask() : texts.get(i).title(),
+              title,
               texts.get(i).checklist(),
-              goal == null ? null : goal.id()));
+              goal == null ? null : goal.id(),
+              subjectName == null ? null : subjectIdsByName.get(subjectName)));
     }
     return new DayPlanResponse(date, block.minutes(), placedMinutes, drafts, evidence);
   }

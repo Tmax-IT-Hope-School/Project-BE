@@ -32,6 +32,9 @@ import com.ithopeschool.projectbe.domain.school.SchoolEventRepository;
 import com.ithopeschool.projectbe.domain.session.SessionMode;
 import com.ithopeschool.projectbe.domain.session.StudySession;
 import com.ithopeschool.projectbe.domain.session.StudySessionRepository;
+import com.ithopeschool.projectbe.domain.subject.Subject;
+import com.ithopeschool.projectbe.domain.subject.SubjectColor;
+import com.ithopeschool.projectbe.domain.subject.SubjectRepository;
 import com.ithopeschool.projectbe.global.auth.CurrentUserProvider;
 import com.ithopeschool.projectbe.global.exception.ApiException;
 import java.time.Clock;
@@ -69,6 +72,7 @@ class DayPlanServiceTest {
   private final AiClient aiClient = mock(AiClient.class);
   private final AccountRepository accounts = mock(AccountRepository.class);
   private final SchoolEventRepository schoolEvents = mock(SchoolEventRepository.class);
+  private final SubjectRepository subjects = mock(SubjectRepository.class);
   private final DayPlanService service =
       new DayPlanService(
           currentUserProvider,
@@ -82,7 +86,8 @@ class DayPlanServiceTest {
           aiClient,
           CLOCK,
           accounts,
-          schoolEvents);
+          schoolEvents,
+          subjects);
 
   private static OnboardingAnswer answer(LocalTime sleep, LocalTime wake, Chronotype chronotype) {
     OnboardingAnswer.Values values = new OnboardingAnswer.Values();
@@ -361,6 +366,41 @@ class DayPlanServiceTest {
     assertThat(matching.drafts().get(0).goalId()).isEqualTo("4");
   }
 
+  private Subject subject(long id, String name) {
+    Subject subject = new Subject(USER_ID, name, SubjectColor.values()[0]);
+    ReflectionTestUtils.setField(subject, "id", id);
+    return subject;
+  }
+
+  @Test
+  @DisplayName("계획 카드마다 과목을 붙인다: AI 가 고른 내 과목 → 없거나 내 과목이 아니면 제목에 든 과목 이름 → 없으면 null")
+  void draftsGetSubjects() {
+    given(subjects.findByUserIdOrderById(USER_ID))
+        .willReturn(List.of(subject(14, "국어"), subject(15, "영어"), subject(16, "수학")));
+    // 100분 = 50분 두 칸. 첫 칸은 AI 가 "영어", 둘째 칸은 내 과목이 아닌 "과학" 이라 제목("수학 문제집")으로 찾음
+    aiAnswers(
+        new DayPlanPrompt.Answer(
+            List.of(
+                new DayPlanPrompt.Answer.Item("영단어장 22쪽", List.of("단어 외우기"), "영어"),
+                new DayPlanPrompt.Answer.Item("수학 문제집", List.of("3단원 풀기"), "과학"))));
+
+    DayPlanResponse response = service.suggest(planned(null, 100, null, null));
+
+    assertThat(response.drafts())
+        .extracting(DayPlanResponse.Draft::subjectId)
+        .containsExactly("15", "16");
+  }
+
+  @Test
+  @DisplayName("과목을 못 찾으면 subjectId 는 null 이다 (과목이 없는 학생 · 맞는 과목 없음)")
+  void noSubjectWhenNothingMatches() {
+    aiAnswers(null);
+
+    DayPlanResponse response = service.suggest(planned(null, 100, null, null));
+
+    assertThat(response.drafts()).extracting(DayPlanResponse.Draft::subjectId).containsOnlyNulls();
+  }
+
   @Test
   @DisplayName("날짜가 오늘보다 앞이거나 14일보다 뒤면 400 이다")
   void dateRange() {
@@ -619,7 +659,8 @@ class DayPlanServiceTest {
         aiClient,
         Clock.fixed(Instant.parse("2026-10-19T06:00:00Z"), ZoneOffset.UTC),
         accounts,
-        schoolEvents);
+        schoolEvents,
+        subjects);
   }
 
   @Test

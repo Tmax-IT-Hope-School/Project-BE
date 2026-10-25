@@ -24,13 +24,27 @@ public final class DayPlanPrompt {
       String startTime, int minutes, String goalTitle, Integer daysLeft, String pace) {}
 
   // AI 가 돌려주는 JSON 모양 그대로입니다. 칸 순서대로 하나씩 옵니다.
-  //   { "cards": [ { "title": "수학 문제집", "checklist": ["3단원 15문제", "오답 표시"] }, … ] }
+  //   { "cards": [ { "title": "수학 문제집", "checklist": ["3단원 15문제", "오답 표시"], "subject": "수학" }, … ]
+  // }
   public record Answer(List<Item> cards) {
-    public record Item(String title, List<String> checklist) {}
+    // subject: '내 과목' 중 하나 글자 그대로, 없으면 null (#457)
+    public record Item(String title, List<String> checklist, String subject) {
+
+      // 과목 없는 모양 (테스트에서 씀)
+      public Item(String title, List<String> checklist) {
+        this(title, checklist, null);
+      }
+    }
   }
 
-  // 검사를 통과한 칸 하나의 글
-  public record Text(String title, List<String> checklist) {}
+  // 검사를 통과한 칸 하나의 글. subject 는 '내 과목' 에 있는 이름일 때만, 아니면 null
+  public record Text(String title, List<String> checklist, String subject) {
+
+    // 과목 없는 글 (기본 글 · 테스트에서 씀)
+    public Text(String title, List<String> checklist) {
+      this(title, checklist, null);
+    }
+  }
 
   private DayPlanPrompt() {}
 
@@ -40,18 +54,32 @@ public final class DayPlanPrompt {
     return question(date, blocks, recentTitles, List.of());
   }
 
+  // 과목 목록 없이 묻는 모양 (#457 전)
+  public static AiQuestion question(
+      LocalDate date, List<Block> blocks, List<String> recentTitles, List<String> extraLines) {
+    return question(date, blocks, recentTitles, extraLines, List.of());
+  }
+
   // 학생이 알려 준 것(준비하는 것 · 오늘 과목)을 입력 끝에 더한 질문 (2026-10-18 계획 핑퐁)
   //   extraLines 예: ["준비하는 것: 수능", "오늘 배운 과목: 미적분Ⅰ, 문학"]
   //   계획 방 대화(PlanTalk.inputLines, #431)도 여기로 옵니다.
+  //   subjectNames: 내 과목 이름들. AI 가 칸마다 이 중에서 과목을 고릅니다. (#457)
   public static AiQuestion question(
-      LocalDate date, List<Block> blocks, List<String> recentTitles, List<String> extraLines) {
+      LocalDate date,
+      List<Block> blocks,
+      List<String> recentTitles,
+      List<String> extraLines,
+      List<String> subjectNames) {
     Map<String, Object> card = new LinkedHashMap<>();
     card.put("title", AiSchema.string());
     card.put("checklist", AiSchema.stringList());
+    card.put("subject", AiSchema.nullableString());
     return new AiQuestion(
         "day_plan",
         instructions(),
         input(date, blocks, recentTitles)
+            // 과목을 아직 안 만든 학생은 줄을 넣지 않습니다. (subject 는 null 로 옴)
+            + (subjectNames.isEmpty() ? "" : "\n내 과목: " + String.join(" / ", subjectNames))
             + (extraLines.isEmpty() ? "" : "\n" + String.join("\n", extraLines)),
         AiSchema.object(Map.of("cards", AiSchema.list(AiSchema.object(card)))));
   }
@@ -84,6 +112,10 @@ public final class DayPlanPrompt {
             + ChecklistDraft.MAX_ITEM_LENGTH
             + "자까지. 칭찬 · 잔소리는 쓰지 마. "
             + ToneGuide.NO_PUT_DOWN_RULE);
+    // 계획 카드에 과목이 없어서 공부 기록이 "삭제된 과목" 으로 떴습니다. (#457)
+    lines.add(
+        "7. subject: 그 칸 공부에 맞는 과목을 '내 과목' 중 하나 글자 그대로 써."
+            + " 예: 영단어 · 영어 독해 → 영어, 미적분 · 수학 오답 → 수학. 맞는 과목이 없으면 null.");
     return String.join("\n", lines);
   }
 
@@ -122,19 +154,24 @@ public final class DayPlanPrompt {
   //   제목: 앞뒤 공백을 지우고, 비었거나 30자를 넘거나 깎아내리는 말이 있으면 그 칸은 기본 글
   //   체크리스트: 빈 · 50자 넘는 · 깎아내리는 · 겹치는 항목은 버리고 3개까지. 남은 게 없으면 그 칸은 기본 글
   public static List<Text> textsOf(Answer answer, List<Text> fallbacks) {
+    return textsOf(answer, fallbacks, List.of());
+  }
+
+  // subjectNames: 내 과목 이름들. AI 가 고른 과목이 여기에 없으면 null 로 바꿉니다. (AI 가 과목을 지어내지 않게)
+  public static List<Text> textsOf(Answer answer, List<Text> fallbacks, List<String> subjectNames) {
     boolean usable =
         answer != null && answer.cards() != null && answer.cards().size() == fallbacks.size();
     List<Text> texts = new ArrayList<>();
     for (int i = 0; i < fallbacks.size(); i++) {
       Answer.Item item = usable ? answer.cards().get(i) : null;
-      Text text = item == null ? null : checked(item);
+      Text text = item == null ? null : checked(item, subjectNames);
       texts.add(text == null ? fallbacks.get(i) : text);
     }
     return texts;
   }
 
   // 칸 하나의 글 검사. 쓸 수 없으면 null
-  private static Text checked(Answer.Item item) {
+  private static Text checked(Answer.Item item, List<String> subjectNames) {
     String title = item.title() == null ? "" : item.title().trim();
     if (title.isEmpty()
         || title.length() > CardParse.MAX_TITLE_LENGTH
@@ -154,6 +191,10 @@ public final class DayPlanPrompt {
         }
       }
     }
-    return checklist.isEmpty() ? null : new Text(title, checklist);
+    String subject = item.subject() == null ? null : item.subject().trim();
+    return checklist.isEmpty()
+        ? null
+        : new Text(
+            title, checklist, subject != null && subjectNames.contains(subject) ? subject : null);
   }
 }

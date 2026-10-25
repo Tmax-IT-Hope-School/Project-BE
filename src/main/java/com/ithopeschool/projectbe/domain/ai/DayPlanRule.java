@@ -260,6 +260,22 @@ public final class DayPlanRule {
     return result;
   }
 
+  // 제목에 든 과목 이름. AI 가 과목을 못 골랐을 때 씁니다. 긴 이름부터 봐서 "수학Ⅱ" 를 "수학" 보다 먼저 찾습니다. (#457)
+  //   ("수학 오답", [국어, 영어, 수학]) → "수학"     ("기말 전 영단어장", [국어, 영어, 수학]) → null
+  public static String subjectInTitle(String title, List<String> subjectNames) {
+    if (title == null) {
+      return null;
+    }
+    List<String> byLength = new ArrayList<>(subjectNames);
+    byLength.sort(Comparator.comparingInt(String::length).reversed());
+    for (String name : byLength) {
+      if (!name.isBlank() && title.contains(name)) {
+        return name;
+      }
+    }
+    return null;
+  }
+
   // 먼저 할 것의 낱말(두 글자 이상) 중 하나라도 목표 이름에 들어 있는지   ("11월 학평 수학 3등급", "수학 오답") → true
   private static boolean sharesWord(String goalTitle, String firstTask) {
     for (String word : firstTask.split("\\s+")) {

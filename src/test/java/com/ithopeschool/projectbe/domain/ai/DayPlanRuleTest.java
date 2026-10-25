@@ -167,6 +167,15 @@ class DayPlanRuleTest {
   }
 
   @Test
+  @DisplayName("제목에 든 과목 이름을 찾는다. 긴 이름부터 봐서 '수학Ⅱ' 를 '수학' 보다 먼저")
+  void subjectInTitle() {
+    assertThat(DayPlanRule.subjectInTitle("수학 오답", List.of("국어", "영어", "수학"))).isEqualTo("수학");
+    assertThat(DayPlanRule.subjectInTitle("수학Ⅱ 미분", List.of("수학", "수학Ⅱ"))).isEqualTo("수학Ⅱ");
+    assertThat(DayPlanRule.subjectInTitle("기말 전 영단어장", List.of("국어", "영어", "수학"))).isNull();
+    assertThat(DayPlanRule.subjectInTitle(null, List.of("수학"))).isNull();
+  }
+
+  @Test
   @DisplayName("먼저 할 것이 있으면 이름이 겹치는 목표를 첫 칸으로 옮기고, 없으면 첫 칸은 목표 없이 둔다")
   void withFirstTask() {
     DayPlanRule.GoalInfo words = new DayPlanRule.GoalInfo("4", "기말 전 영단어장 1회독", 13, "22쪽");

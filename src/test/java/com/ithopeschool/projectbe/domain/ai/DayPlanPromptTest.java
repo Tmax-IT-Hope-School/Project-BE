@@ -66,4 +66,31 @@ class DayPlanPromptTest {
                 FALLBACKS))
         .isEqualTo(FALLBACKS);
   }
+
+  @Test
+  @DisplayName("AI 에게 내 과목 목록을 주고, 답의 과목은 그 목록에 있을 때만 쓴다 (지어낸 과목은 null)")
+  void subjectsFromMyList() {
+    List<String> mine = List.of("국어", "영어", "수학");
+    AiQuestion question =
+        DayPlanPrompt.question(
+            LocalDate.of(2026, 10, 25),
+            List.of(new DayPlanPrompt.Block("20:00", 50, null, null, null)),
+            List.of(),
+            List.of(),
+            mine);
+
+    assertThat(question.input()).contains("내 과목: 국어 / 영어 / 수학");
+    assertThat(question.instructions()).contains("7. subject:", "영단어 · 영어 독해 → 영어");
+    List<DayPlanPrompt.Text> texts =
+        DayPlanPrompt.textsOf(
+            new DayPlanPrompt.Answer(
+                List.of(
+                    new DayPlanPrompt.Answer.Item("영단어", List.of("22쪽"), " 영어 "),
+                    new DayPlanPrompt.Answer.Item("물리 개념", List.of("1단원"), "물리"))),
+            List.of(
+                new DayPlanPrompt.Text("기본", List.of("기본")),
+                new DayPlanPrompt.Text("기본", List.of("기본"))),
+            mine);
+    assertThat(texts).extracting(DayPlanPrompt.Text::subject).containsExactly("영어", null);
+  }
 }
