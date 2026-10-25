@@ -20,6 +20,7 @@ import com.ithopeschool.projectbe.domain.session.StudySessionRepository;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -147,5 +148,57 @@ class CallCardLoaderTest {
     assertThat(merged.yesterdayAwayCount()).isEqualTo(6);
     assertThat(merged.yesterdayAwayPeakHour()).isEqualTo(21);
     assertThat(merged.yesterdayUnlockCount()).isEqualTo(2);
+  }
+
+  @Test
+  @DisplayName("'지난 통화 이후' 칸(결산 · 카드 · 조건부 모듈)은 FE 가 기기에서 센 값이라 FE 카드 것을 옮긴다 (#28 · #434)")
+  void sinceLastCallComesFromTheFeCard() {
+    CallSessionRequest.Card server =
+        new CallSessionRequest.Card(
+            100, 240, null, 3, 180, "19:00", 64, 55, 10, List.of(3), 2, null, null, null);
+    CallSessionRequest.Card fe =
+        new CallSessionRequest.Card(
+            999,
+            999,
+            "phone",
+            9,
+            999,
+            "19:00",
+            1,
+            1,
+            1,
+            List.of(1),
+            99,
+            6,
+            21,
+            2,
+            5,
+            4,
+            80,
+            2,
+            1,
+            "procrastinated",
+            3,
+            1,
+            true,
+            "review4");
+
+    CallSessionRequest.Card merged = CallCardLoader.withFocusFrom(server, fe);
+
+    assertThat(merged.yesterdayStudyMinutes()).isEqualTo(100);
+    assertThat(merged.hoursSinceLastCall()).isEqualTo(5);
+    assertThat(merged.doneCardCount()).isEqualTo(4);
+    assertThat(merged.cardRunRate()).isEqualTo(80);
+    assertThat(merged.missedCardCount()).isEqualTo(2);
+    assertThat(merged.unhandledCardCount()).isEqualTo(1);
+    assertThat(merged.mainMissCause()).isEqualTo("procrastinated");
+    assertThat(merged.nextCardCount()).isEqualTo(3);
+    assertThat(merged.nextAbsoluteCardCount()).isEqualTo(1);
+    assertThat(merged.emotionTagsMissing()).isTrue();
+    assertThat(merged.callModule()).isEqualTo("review4");
+    // FE 카드가 없으면 새 칸은 모두 모름(null)입니다.
+    CallSessionRequest.Card serverOnly = CallCardLoader.withFocusFrom(server, null);
+    assertThat(serverOnly.doneCardCount()).isNull();
+    assertThat(serverOnly.callModule()).isNull();
   }
 }

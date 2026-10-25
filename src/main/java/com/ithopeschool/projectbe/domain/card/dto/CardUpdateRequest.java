@@ -18,6 +18,7 @@ import java.util.List;
 // - 지우는 방법 (계획 바꾸기와 같은 약속: 빈 값을 보냄)
 //     repeatDays: []          → 1회성 카드          startTime: ""          → 시작 시각 없음
 //     goalId: ""              → 목표 없음           expectedDoneReason: "" → 이유 지우기
+//     subjectId: ""           → 과목 없음
 //     expectedFailCauses: []  → 예상 실패 원인 지우기
 // - expectedDone · alert · planningMs 는 지우는 방법이 없습니다. 기본으로 되돌리려면 기본값을 보냅니다.
 //   (예상 달성 개수 = 체크리스트 개수, 알림 = { "method": "message", "minutesBefore": 0 })
@@ -40,6 +41,7 @@ public record CardUpdateRequest(
     @Size(min = 1, max = 20, message = "체크리스트는 1개 이상 20개까지 적을 수 있어요")
         List<@NotNull(message = "체크리스트 항목을 입력해 주세요") @Valid ChecklistItemRequest> checklist,
     @Pattern(regexp = "\\d{0,18}", message = "목표 번호가 올바르지 않아요") String goalId,
+    @Pattern(regexp = "\\d{0,18}", message = "과목 번호가 올바르지 않아요") String subjectId,
     String priority,
     String type,
     @Min(value = 0, message = "예상 달성 개수는 0 이상이어야 해요") Integer expectedDone,
@@ -68,6 +70,7 @@ public record CardUpdateRequest(
         && durationMinutes == null
         && checklist == null
         && goalId == null
+        && subjectId == null
         && priority == null
         && type == null
         && expectedDone == null

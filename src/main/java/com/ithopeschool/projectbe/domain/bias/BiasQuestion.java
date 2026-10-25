@@ -133,7 +133,8 @@ public record BiasQuestion(CognitiveBias bias, int index) {
   }
 
   // 어제 못 채운 이유와 이어지는 생각 습관. 이어 붙이지 않는 이유면 null 입니다. (규칙 2)
-  static CognitiveBias biasOfMissReason(String missReason) {
+  // 음성 통화 대본(CallScript)도 "오늘 생각 습관이 어제 이유에서 나왔는지" 를 이 함수로 봅니다. (#434)
+  public static CognitiveBias biasOfMissReason(String missReason) {
     if (missReason == null) {
       return null;
     }

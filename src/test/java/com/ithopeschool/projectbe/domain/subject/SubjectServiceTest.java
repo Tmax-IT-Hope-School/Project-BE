@@ -317,6 +317,31 @@ class SubjectServiceTest {
   }
 
   @Test
+  @DisplayName("과목을 지우면 그 과목을 붙인 카드의 과목을 먼저 비운다 (카드는 지우지 않음, 이슈 #404)")
+  void deleteClearsCardSubjectFirst() {
+    Subject math = subject(3, ME, "수학", SubjectColor.BLUE);
+    given(subjectRepository.findByIdAndUserId(3L, ME)).willReturn(Optional.of(math));
+
+    subjectService.delete(3L);
+
+    InOrder order = inOrder(subjectRepository);
+    order.verify(subjectRepository).clearCardSubject(ME, 3L);
+    order.verify(subjectRepository).delete(math);
+  }
+
+  @Test
+  @DisplayName("계획 · 기록 · 루틴 때문에 못 지우면(409) 카드의 과목도 비우지 않는다")
+  void conflictKeepsCardSubject() {
+    given(subjectRepository.findByIdAndUserId(3L, ME))
+        .willReturn(Optional.of(subject(3L, ME, "수학", SubjectColor.BLUE)));
+    given(subjectRepository.hasStudySessions(ME, 3L)).willReturn(true);
+
+    assertError(
+        () -> subjectService.delete(3L), ErrorCode.CONFLICT, "이 과목으로 만든 계획이나 공부 기록이 있어서 지울 수 없어요");
+    verify(subjectRepository, never()).clearCardSubject(anyLong(), anyLong());
+  }
+
+  @Test
   @DisplayName("이 과목으로 만든 계획이 있으면 409 이고 지우지 않는다")
   void deleteWithPlans() {
     Subject math = subject(3, ME, "수학", SubjectColor.BLUE);

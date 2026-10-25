@@ -55,8 +55,10 @@ public class ChatAiClient {
 
   // 상담 채팅 답의 모양(JSON schema)입니다. OpenAI 가 이 모양으로만 답하게 합니다. (turn)
   //   { "reply": "…", "quickReplies": ["…"], "action": { "type": "none", "minutes": null, "title":
-  // null, "date": null }, "tags": [] }
+  // null, "date": null, "startTime": null }, "tags": [] }
   // tags 는 "코치랑 이야기하기" 주제(ChatTopic)가 있을 때 AI 가 학생 말에서 짐작한 이유 값입니다. (2026-10-18)
+  // day_plan 과 startTime(시작 시각 "HH:mm")은 계획 방의 "오늘 계획 짜 줘" 행동입니다. (2026-10-25 #431)
+  // strict 모드는 모든 칸이 required 여야 해서, startTime 을 쓰지 않는 행동도 null 로 채웁니다.
   // 개수 · 길이 제한은 schema 대신 서버가 검사합니다. (ChatService.cleanTurn)
   static final Map<String, Object> TURN_SCHEMA =
       Map.of(
@@ -79,7 +81,7 @@ public class ChatAiClient {
                   "additionalProperties",
                   false,
                   "required",
-                  List.of("type", "minutes", "title", "date"),
+                  List.of("type", "minutes", "title", "date", "startTime"),
                   "properties",
                   Map.of(
                       "type",
@@ -93,12 +95,15 @@ public class ChatAiClient {
                               "shrink_today",
                               "create_card",
                               "make_plan",
-                              "start_quiz")),
+                              "start_quiz",
+                              "day_plan")),
                       "minutes",
                       Map.of("type", List.of("integer", "null")),
                       "title",
                       Map.of("type", List.of("string", "null")),
                       "date",
+                      Map.of("type", List.of("string", "null")),
+                      "startTime",
                       Map.of("type", List.of("string", "null")))),
               "tags",
               Map.of("type", "array", "items", Map.of("type", "string"))));
@@ -120,6 +125,33 @@ public class ChatAiClient {
               + " 시험 · 대회 · 수행평가처럼 무엇을 언제까지 준비한다고 하면 make_plan 과 title(목표 한 줄, 30자 안쪽) ·"
               + " date(마감 날 YYYY-MM-DD, 모르면 null). 학생이 방금 공부를 끝냈다고 하거나 잘 알았는지 확인해 달라고 하면"
               + " start_quiz 와 title(공부한 주제, 30자 안쪽). 아니면 none. date 는 make_plan 에만 써.",
+          "- tags: [이번 대화의 주제] 에 '고를 수 있는 이유' 가 있을 때만, 학생 말에서 보이는 이유 값 0~3개."
+              + " 그 목록에 없는 값은 쓰지 마. 주제가 없거나 이유가 안 보이면 빈 목록.",
+          "- 학생이 힘든 마음을 말하면 action 은 none 이고 quickReplies · tags 는 비워.");
+
+  // 계획 방(PLANNER)의 "답 모양" 규칙입니다. 상담 · 과목 쌤 방은 위의 TURN_RULES 그대로입니다. (2026-10-25 #431)
+  // 이 칸은 대본 맨 끝에 붙어 가장 세게 먹혀서, 여기서 "두세 문장" 이라고 하면 계획 방 칸이 뭐라 해도 짧게 답합니다.
+  // 그래서 계획 방은 다섯 문장 · 짧은 목록까지 쓰게 하고, 오늘 계획을 부르는 day_plan 을 가장 먼저 적습니다.
+  // "오늘 계획 짜 줘" 칩은 앱이 늘 따로 보여 주므로 quickReplies 에 넣지 않게 합니다.
+  // shrink_today · start_quiz 는 적지 않았습니다. 줄이기는 day_plan 의 minutes 로, 확인 문제는 과목 쌤 방에서 합니다.
+  static final String PLANNER_TURN_RULES =
+      String.join(
+          "\n",
+          "",
+          "",
+          "[답 모양]",
+          "- reply: 학생에게 할 말. 다섯 문장까지, 또는 '- ' 로 시작하는 짧은 목록 3~5줄. 질문은 한 답에 하나까지만.",
+          "- quickReplies: 학생이 눌러서 바로 보낼 짧은 답 2~3개. 학생 말투로, 각각 15자 안쪽."
+              + " 예: '좋아, 그렇게 해' · '수학 먼저 할래' · '좀 줄여 줘'."
+              + " '오늘 계획 짜 줘' 는 앱이 늘 따로 보여 주니 넣지 마.",
+          "- action: 학생이 계획에 좋다고 하거나 '짜 줘' · '그렇게 해 줘' 처럼 말하면 day_plan."
+              + " minutes 는 오늘 이미 있는 카드까지 합친 하루 총 공부 분(20~600), title 은 먼저 할 것 한 줄(30자 안쪽),"
+              + " startTime 은 시작 시각(HH:mm, 24시간). 셋 다 학생과 정한 것만 넣고 안 정한 것은 null, date 는 null."
+              + " 학생이 지금 바로 공부를 시작하겠다고 하면 start_timer."
+              + " 카드 한 장만 더하기로 했으면 create_card 와 title(20자 안쪽) · minutes(30~120)."
+              + " 시험 · 대회 · 수행평가처럼 무엇을 언제까지 준비한다고 하면 make_plan 과 title(목표 한 줄, 30자 안쪽) ·"
+              + " date(마감 날 YYYY-MM-DD, 모르면 null). 아니면 none."
+              + " date 는 make_plan 에만, startTime 은 day_plan 에만 써.",
           "- tags: [이번 대화의 주제] 에 '고를 수 있는 이유' 가 있을 때만, 학생 말에서 보이는 이유 값 0~3개."
               + " 그 목록에 없는 값은 쓰지 마. 주제가 없거나 이유가 안 보이면 빈 목록.",
           "- 학생이 힘든 마음을 말하면 action 은 none 이고 quickReplies · tags 는 비워.");
@@ -265,7 +297,27 @@ public class ChatAiClient {
                             "type", "input_image", "image_url", imageDataUrl, "detail", "auto"))));
     // 검색 · 사진은 오래 걸려서 25초까지 기다리는 연결을 씁니다.
     RestClient client = webSearch || imageDataUrl != null ? imageRestClient : restClient;
-    return sendTurn(client, instructions, input, webSearch ? webSearchTools() : null);
+    return sendTurn(client, instructions, input, webSearch ? webSearchTools() : null, TURN_RULES);
+  }
+
+  // 계획 방의 답 한 번. turn · turnWithImage 와 같고, 대본 끝에 계획 방의 답 모양(PLANNER_TURN_RULES)을 붙입니다. (#431)
+  //   imageDataUrl : 학생의 마지막 말에 붙은 사진 (없으면 null)
+  public Optional<ChatTurn> turnForPlanner(
+      String instructions, List<CallFinishRequest.Line> lines, String imageDataUrl) {
+    if (imageDataUrl == null) {
+      return sendTurn(restClient, instructions, inputOf(lines), null, PLANNER_TURN_RULES);
+    }
+    List<Map<String, Object>> input =
+        List.of(
+            Map.of(
+                "role",
+                "user",
+                "content",
+                List.of(
+                    Map.of("type", "input_text", "text", inputOf(lines)),
+                    Map.of("type", "input_image", "image_url", imageDataUrl, "detail", "auto"))));
+    // 사진은 읽느라 오래 걸려서 25초까지 기다리는 연결을 씁니다.
+    return sendTurn(imageRestClient, instructions, input, null, PLANNER_TURN_RULES);
   }
 
   // OpenAI Responses API 의 내장 웹 검색 도구 (공식 문서 "Web search": type "web_search",
@@ -283,14 +335,19 @@ public class ChatAiClient {
             Map.of("allowed_domains", TutorWebSearch.ALLOWED_DOMAINS)));
   }
 
-  // turn · turnWithImage · turnForTutor 가 같이 쓰는 보내기. input 은 글 하나이거나, 사진이 섞인 메시지 목록입니다.
-  // tools 는 웹 검색 도구 목록이고, 없으면 null 입니다.
+  // turn · turnWithImage · turnForTutor · turnForPlanner 가 같이 쓰는 보내기. input 은 글 하나이거나, 사진이 섞인 메시지
+  // 목록입니다.
+  // tools 는 웹 검색 도구 목록이고, 없으면 null 입니다. rules 는 대본 끝에 붙이는 답 모양 규칙입니다. (계획 방만 다름)
   private Optional<ChatTurn> sendTurn(RestClient client, String instructions, Object input) {
-    return sendTurn(client, instructions, input, null);
+    return sendTurn(client, instructions, input, null, TURN_RULES);
   }
 
   private Optional<ChatTurn> sendTurn(
-      RestClient client, String instructions, Object input, List<Map<String, Object>> tools) {
+      RestClient client,
+      String instructions,
+      Object input,
+      List<Map<String, Object>> tools,
+      String rules) {
     if (!isEnabled()) {
       return Optional.empty();
     }
@@ -298,7 +355,7 @@ public class ChatAiClient {
       TurnRequest request =
           new TurnRequest(
               model,
-              instructions + TURN_RULES,
+              instructions + rules,
               input,
               false,
               new TextOption(new Format("json_schema", "coach_turn", true, TURN_SCHEMA)),
@@ -323,7 +380,7 @@ public class ChatAiClient {
       if (tools != null) {
         // 검색 도구를 못 쓰는 경우(모델 · 설정)일 수 있어서 도구 없이 한 번 더 보냅니다. 상태 번호만 찍습니다.
         log.warn("[AI] 검색 도구를 붙인 채팅이 거절되어 도구 없이 다시 보내요: {}", e.getStatusCode().value());
-        return sendTurn(client, instructions, input, null);
+        return sendTurn(client, instructions, input, null, rules);
       }
       log.warn("[AI] 채팅 답을 받지 못했어요: {}", e.getClass().getSimpleName());
       return Optional.empty();
@@ -381,7 +438,8 @@ public class ChatAiClient {
                   raw.action().type(),
                   raw.action().minutes(),
                   raw.action().title(),
-                  raw.action().date());
+                  raw.action().date(),
+                  raw.action().startTime());
       return new ChatTurn(
           raw.reply().trim(),
           raw.quickReplies() == null ? List.of() : raw.quickReplies(),
@@ -462,7 +520,7 @@ public class ChatAiClient {
   record RawTurn(String reply, List<String> quickReplies, RawAction action, List<String> tags) {
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    record RawAction(String type, Integer minutes, String title, String date) {}
+    record RawAction(String type, Integer minutes, String title, String date, String startTime) {}
   }
 
   // 받는 모양에서 우리가 읽는 부분만 적었습니다. 나머지 필드는 무시합니다.

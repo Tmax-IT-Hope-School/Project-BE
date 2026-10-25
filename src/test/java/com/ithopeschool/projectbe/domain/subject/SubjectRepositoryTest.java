@@ -2,10 +2,13 @@ package com.ithopeschool.projectbe.domain.subject;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.ithopeschool.projectbe.domain.card.Card;
+import com.ithopeschool.projectbe.domain.card.ChecklistItem;
 import com.ithopeschool.projectbe.domain.plan.StudyPlan;
 import com.ithopeschool.projectbe.domain.session.StudySession;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -158,5 +161,38 @@ class SubjectRepositoryTest {
     assertThat(subjectRepository.existsByUserIdAndName(1L, "수학")).isFalse();
     save(1L, "수학", SubjectColor.BLUE);
     assertThat(subjectRepository.existsByUserIdAndName(1L, "수학")).isTrue();
+  }
+
+  // 과목을 붙인 카드 한 장을 저장합니다. (이슈 #404)
+  private Card saveCard(Long userId, Long subjectId) {
+    Card card =
+        new Card(
+            userId,
+            "문제집",
+            LocalDate.of(2026, 10, 12),
+            60,
+            List.of(new ChecklistItem("i1", "42쪽")),
+            START);
+    card.changeSubjectId(subjectId);
+    return em.persistAndFlush(card);
+  }
+
+  @Test
+  @DisplayName("과목을 지울 때 쓰는 clearCardSubject 는 그 과목을 붙인 내 카드만 과목을 비운다 (카드는 그대로)")
+  void clearCardSubjectOnlyMine() {
+    Subject math = save(1L, "수학", SubjectColor.RED);
+    Subject english = save(1L, "영어", SubjectColor.BLUE);
+    Card mathCard = saveCard(1L, math.getId());
+    Card englishCard = saveCard(1L, english.getId());
+    // 2번 사람의 카드가 같은 과목 번호를 가리켜도 건드리지 않습니다.
+    Card othersCard = saveCard(2L, math.getId());
+
+    int cleared = subjectRepository.clearCardSubject(1L, math.getId());
+    em.clear();
+
+    assertThat(cleared).isEqualTo(1);
+    assertThat(em.find(Card.class, mathCard.getId()).getSubjectId()).isNull();
+    assertThat(em.find(Card.class, englishCard.getId()).getSubjectId()).isEqualTo(english.getId());
+    assertThat(em.find(Card.class, othersCard.getId()).getSubjectId()).isEqualTo(math.getId());
   }
 }

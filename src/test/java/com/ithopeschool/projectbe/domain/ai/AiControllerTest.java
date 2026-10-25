@@ -1,5 +1,6 @@
 package com.ithopeschool.projectbe.domain.ai;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
@@ -22,6 +23,7 @@ import com.ithopeschool.projectbe.domain.ai.dto.ChecklistResponse;
 import com.ithopeschool.projectbe.domain.ai.dto.CoachNudgeRequest;
 import com.ithopeschool.projectbe.domain.ai.dto.CoachNudgeResponse;
 import com.ithopeschool.projectbe.domain.ai.dto.DailyMissionsResponse;
+import com.ithopeschool.projectbe.domain.ai.dto.DayPlanRequest;
 import com.ithopeschool.projectbe.domain.ai.dto.DayPlanResponse;
 import com.ithopeschool.projectbe.domain.ai.dto.DayPlanReviseResponse;
 import com.ithopeschool.projectbe.domain.ai.dto.ExamNextStepResponse;
@@ -31,6 +33,8 @@ import com.ithopeschool.projectbe.domain.ai.dto.FirstStepResponse;
 import com.ithopeschool.projectbe.domain.ai.dto.LongPlanOutline;
 import com.ithopeschool.projectbe.domain.ai.dto.LongPlanResponse;
 import com.ithopeschool.projectbe.domain.ai.dto.ProfileLinesResponse;
+import com.ithopeschool.projectbe.domain.ai.dto.ProofPhotoRequest;
+import com.ithopeschool.projectbe.domain.ai.dto.ProofPhotoResponse;
 import com.ithopeschool.projectbe.domain.ai.dto.QuickCardResponse;
 import com.ithopeschool.projectbe.domain.ai.dto.RoutineCardRequest;
 import com.ithopeschool.projectbe.domain.ai.dto.RoutineCardResponse;
@@ -44,6 +48,7 @@ import java.time.LocalDate;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.http.MediaType;
@@ -68,6 +73,7 @@ class AiControllerTest {
   @MockitoBean private ProfileLinesService profileLinesService;
   @MockitoBean private CardParseService cardParseService;
   @MockitoBean private CardPhotoService cardPhotoService;
+  @MockitoBean private ProofPhotoService proofPhotoService;
   @MockitoBean private CardDefaultsService cardDefaultsService;
   @MockitoBean private SelfAnalysisService selfAnalysisService;
   @MockitoBean private DayPlanService dayPlanService;
@@ -569,6 +575,40 @@ class AiControllerTest {
     verifyNoInteractions(cardPhotoService);
   }
 
+  // ---- 사진으로 증빙 적기 ----
+
+  private ResultActions proofFromPhoto(String body) throws Exception {
+    return mockMvc.perform(
+        post("/api/v1/ai/proof-from-photo").contentType(MediaType.APPLICATION_JSON).content(body));
+  }
+
+  @Test
+  @DisplayName("사진으로 증빙 적기: 200 과 한 줄, 카드 제목의 앞뒤 공백은 지워서 넘긴다")
+  void proofFromPhotoReturnsSummary() throws Exception {
+    given(proofPhotoService.summarize(any()))
+        .willReturn(ProofPhotoResponse.of("수학 문제집 42~45쪽 풀고 틀린 3문제 표시함"));
+    proofFromPhoto("{\"image\":\"data:image/jpeg;base64,AQID\",\"cardTitle\":\" 수학 문제집 \"}")
+        .andExpect(status().isOk())
+        .andExpect(
+            content()
+                .json("{\"showHelp\":false,\"summary\":\"수학 문제집 42~45쪽 풀고 틀린 3문제 표시함\"}", true));
+    verify(proofPhotoService)
+        .summarize(new ProofPhotoRequest("data:image/jpeg;base64,AQID", "수학 문제집"));
+  }
+
+  @Test
+  @DisplayName("사진으로 증빙 적기: 사진이 없거나 카드 제목이 100자를 넘으면 400 이고 서비스를 부르지 않는다")
+  void proofFromPhotoRejectsBadRequests() throws Exception {
+    proofFromPhoto("{\"cardTitle\":\"수학\"}")
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.error.message").value("사진을 보내 주세요"));
+    proofFromPhoto(
+            "{\"image\":\"data:image/jpeg;base64,AQID\",\"cardTitle\":\"" + "가".repeat(101) + "\"}")
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.error.message").value("카드 제목은 100자 이하로 보내 주세요"));
+    verifyNoInteractions(proofPhotoService);
+  }
+
   // ---- 카드 폼 기본값 ----
 
   @Test
@@ -795,6 +835,52 @@ class AiControllerTest {
         .andExpect(jsonPath("$.error.message").value("계획을 짤 날짜를 보내 주세요"));
   }
 
+  @Test
+  @DisplayName("AI 하루 계획: 계획 방에서 정한 총 분 · 시작 시각 · 대화를 받고, 범위 · 모양이 틀리면 400 (#431)")
+  void dayPlanWithPlannerChoices() throws Exception {
+    LocalDate date = LocalDate.parse("2026-10-18");
+    given(dayPlanService.suggest(any()))
+        .willReturn(new DayPlanResponse(date, 50, 0, List.of(), List.of("그날은 카드를 넣을 빈 시간이 없어요")));
+
+    mockMvc
+        .perform(
+            post("/api/v1/ai/day-plan")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    "{\"date\":\"2026-10-18\",\"totalMinutes\":120,\"startTime\":\"21:00\","
+                        + "\"planTalk\":[\"나: 오늘 2시간만, 수학 먼저\"]}"))
+        .andExpect(status().isOk());
+    ArgumentCaptor<DayPlanRequest> sent = ArgumentCaptor.forClass(DayPlanRequest.class);
+    verify(dayPlanService).suggest(sent.capture());
+    assertThat(sent.getValue().totalMinutes()).isEqualTo(120);
+    assertThat(sent.getValue().startTime()).isEqualTo("21:00");
+    assertThat(sent.getValue().planTalk()).containsExactly("나: 오늘 2시간만, 수학 먼저");
+
+    mockMvc
+        .perform(
+            post("/api/v1/ai/day-plan")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"date\":\"2026-10-18\",\"totalMinutes\":10}"))
+        .andExpect(status().isBadRequest())
+        .andExpect(
+            jsonPath("$.error.message").value("하루 총 공부 분(totalMinutes)은 20 ~ 600 으로 보내 주세요"));
+    mockMvc
+        .perform(
+            post("/api/v1/ai/day-plan")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"date\":\"2026-10-18\",\"startTime\":\"25:00\"}"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.error.message").value("시작 시각(startTime)은 HH:mm 으로 보내 주세요"));
+    mockMvc
+        .perform(
+            post("/api/v1/ai/day-plan")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    "{\"date\":\"2026-10-18\",\"planTalk\":[\"1\",\"2\",\"3\",\"4\",\"5\",\"6\",\"7\",\"8\",\"9\"]}"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.error.message").value("계획 방 대화(planTalk)는 8줄까지 보낼 수 있어요"));
+  }
+
   // ---- AI 오늘의 미션 ----
 
   @Test
@@ -872,6 +958,20 @@ class AiControllerTest {
                 .content("{" + drafts + "}"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.error.message").value("어떻게 고칠지 적어 주세요"));
+
+    // 계획 방 대화(planTalk, #431)는 한 줄 200자까지
+    mockMvc
+        .perform(
+            post("/api/v1/ai/day-plan/revise")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    "{"
+                        + drafts
+                        + ",\"request\":\"줄여 줘\",\"planTalk\":[\""
+                        + "가".repeat(201)
+                        + "\"]}"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.error.message").value("계획 방 대화 한 줄은 200자 이하로 보내 주세요"));
   }
 
   // ---- 확인 문제 ----
@@ -884,7 +984,8 @@ class AiControllerTest {
             StudyQuizResponse.of(
                 List.of(
                     new StudyQuiz.Question(
-                        "lim (n→∞) 1/n 의 값은?", List.of("0", "1", "∞", "없다"), 0, "0 에 가까워져."))));
+                        "lim (n→∞) 1/n 의 값은?", List.of("0", "1", "∞", "없다"), 0, "0 에 가까워져.", null)),
+                "함수"));
 
     mockMvc
         .perform(
@@ -895,7 +996,7 @@ class AiControllerTest {
         .andExpect(
             content()
                 .json(
-                    "{\"showHelp\":false,\"questions\":[{\"question\":\"lim (n→∞) 1/n 의 값은?\",\"choices\":[\"0\",\"1\",\"∞\",\"없다\"],\"answerIndex\":0,\"explanation\":\"0 에 가까워져.\"}],\"reason\":null}",
+                    "{\"showHelp\":false,\"questions\":[{\"question\":\"lim (n→∞) 1/n 의 값은?\",\"choices\":[\"0\",\"1\",\"∞\",\"없다\"],\"answerIndex\":0,\"explanation\":\"0 에 가까워져.\",\"passage\":null}],\"unit\":\"함수\",\"reason\":null}",
                     true));
     verify(studyQuizService).make(new StudyQuizRequest("수열의 극한", List.of(), null, null, 3));
   }

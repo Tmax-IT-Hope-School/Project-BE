@@ -14,8 +14,10 @@ import java.util.List;
 //   2. 아니면 처음 설문의 "하루 공부 가능 시간", 그것도 없으면 120분
 //   3. 심리검사의 계획 낙관이 높으면 0.8배로 줄입니다. (계획을 크게 잡는 사람을 위해)
 //   4. 10분 단위로 반올림하고 30 ~ 600분 안으로 맞춘 뒤, 그날 이미 있는 카드 시간을 뺍니다.
+//   학생이 계획 방에서 총량을 직접 정했으면(요청의 totalMinutes) 1 ~ 3 대신 그 값을 씁니다. (chosenTotalOf, 2026-10-25 #431)
 //
 // ■ 공부할 수 있는 시간 (studyWindowOf) — 수면 보호 시간(최소 6시간, FE 의 getSleepWindow)과 일어난 뒤 1시간을 뺀 나머지
+//   학생이 시작 시각을 정했으면(요청의 startTime) 그 전은 뺍니다. (startingAt, #431)
 // ■ 빈 시간 (freeSlotsOf) — 고정 일정(학교 · 학원)과 그날 카드의 앞뒤로 10분씩 여유를 두고 뺀 나머지
 //   학교를 등록했는데 그날(평일) 수업 시간과 겹치는 고정 일정이 없으면, 기본 수업 시간(classHours)도 뺍니다.
 // ■ 칸 놓기 (placeBlocks) — 빈 시간에 한 칸 길이로 채우고, 칸 사이도 10분 띄웁니다. 저녁형은 늦은 시간부터 채웁니다.
@@ -105,6 +107,35 @@ public final class DayPlanRule {
       evidence.add("그날 이미 있는 카드 " + alreadyPlanned + "분을 뺐어요");
     }
     return new Total(Math.max(0, rounded - alreadyPlanned), basis, evidence);
+  }
+
+  // 학생이 계획 방에서 직접 정한 하루 총량과 근거 (2026-10-25 #431)
+  // 기록으로 정하는 총량(totalMinutesOf) 대신 씁니다. 평균 · 설문 · 계획 낙관으로 바꾸지 않습니다. (학생이 정한 것이 먼저)
+  //   chosenMinutes: 학생과 정한 오늘 총 공부 분 (요청 검사에서 20 ~ 600) / alreadyPlanned: 그날 이미 있는 카드 시간(분)
+  // 한 칸은 30분 이상이라(StudyBlock) 30분보다 적으면 30분으로 잡고, 그날 이미 있는 카드 시간은 똑같이 뺍니다.
+  //   (120, 0) → 120     (20, 0) → 30     (120, 60) → 60     (90, 120) → 0
+  public static Total chosenTotalOf(int chosenMinutes, int alreadyPlanned) {
+    List<String> evidence = new ArrayList<>();
+    evidence.add("계획 방에서 오늘 " + chosenMinutes + "분 하기로 해서 그만큼 잡았어요");
+    int total = Math.min(MAX_TOTAL, chosenMinutes);
+    if (total < MIN_BLOCK) {
+      total = MIN_BLOCK;
+      evidence.add("한 칸은 " + MIN_BLOCK + "분 이상이라 " + MIN_BLOCK + "분으로 잡았어요");
+    }
+    if (alreadyPlanned > 0) {
+      evidence.add("그날 이미 있는 카드 " + alreadyPlanned + "분을 뺐어요");
+    }
+    return new Total(Math.max(0, total - alreadyPlanned), "계획 방에서 정한 대로", evidence);
+  }
+
+  // 학생이 정한 시작 시각 전은 빼고, 공부할 수 있는 시간을 줄입니다. (#431)
+  // 시작 시각이 window 의 시작보다 앞이면 그대로이고, 끝보다 뒤면 길이 0 인 시간(빈 시간 없음)이 됩니다.
+  //   window 08:00 ~ 23:00, 21:00 → 21:00 ~ 23:00
+  //   window 08:00 ~ 23:00, 07:00 → 08:00 ~ 23:00 (그대로)
+  //   window 08:00 ~ 23:00, 23:30 → 23:30 ~ 23:30 (빈 시간 없음)
+  public static Span startingAt(Span window, LocalTime startTime) {
+    int start = Math.max(window.start(), dayMinutesOf(startTime));
+    return new Span(start, Math.max(start, window.end()));
   }
 
   // 평일 기본 수업 시간 (하루 시작 기준 분)   08:00 ~ 16:30 → [480, 990)

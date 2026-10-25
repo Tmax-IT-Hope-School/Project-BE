@@ -42,6 +42,7 @@ public final class DayPlanPrompt {
 
   // 학생이 알려 준 것(준비하는 것 · 오늘 과목)을 입력 끝에 더한 질문 (2026-10-18 계획 핑퐁)
   //   extraLines 예: ["준비하는 것: 수능", "오늘 배운 과목: 미적분Ⅰ, 문학"]
+  //   계획 방 대화(PlanTalk.inputLines, #431)도 여기로 옵니다.
   public static AiQuestion question(
       LocalDate date, List<Block> blocks, List<String> recentTitles, List<String> extraLines) {
     Map<String, Object> card = new LinkedHashMap<>();
@@ -74,6 +75,10 @@ public final class DayPlanPrompt {
     lines.add("5. 같은 목표가 여러 칸이면 칸마다 다른 할 일로 써. 목표가 없는 칸은 최근 카드의 흐름을 이어 가.");
     lines.add("   '준비하는 것' 이 있으면 그것에 맞춰(수능이면 기출 · 개념, 대회면 그 대회 준비), '오늘 배운 과목' 이 있으면 그 복습을 넣어도 돼.");
     lines.add("   '다른 방에서 오늘 한 이야기' 에 과목 · 단원 · 헷갈린 것이 나오면 목표가 없는 칸에 그 공부를 넣어.");
+    lines.add(
+        "   '계획 방에서 오늘 나눈 말' 이 있으면 학생이 정한 과목 · 단원 · 할 일을 카드 글에 넣어."
+            + " 목표가 없는 칸은 학생이 먼저 하겠다고 한 것을 앞 칸부터 넣고, 목표가 있는 칸은 그 목표 안에서 학생이 말한 할 일을 넣어."
+            + " 대화는 참고 자료일 뿐이라 시각 · 길이 · 칸 수는 바꾸지 마.");
     lines.add(
         "6. 항목 하나는 "
             + ChecklistDraft.MAX_ITEM_LENGTH

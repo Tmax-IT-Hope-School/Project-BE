@@ -47,7 +47,7 @@ class CardControllerTest {
 
   private static final LocalDate OCT_12 = LocalDate.of(2026, 10, 12);
 
-  // 반복 카드 한 장 (알림 · 목표 · 예상 칸은 비어 있음)
+  // 반복 카드 한 장 (과목은 3번, 알림 · 목표 · 예상 칸은 비어 있음)
   private static final CardResponse MATH =
       new CardResponse(
           "7",
@@ -58,6 +58,7 @@ class CardControllerTest {
           60,
           List.of(new CardResponse.ChecklistItemResponse("i1", "42~45쪽")),
           null,
+          "3",
           "flexible",
           "self",
           null,
@@ -88,7 +89,7 @@ class CardControllerTest {
   // ---- 목록 ----
 
   @Test
-  @DisplayName("목록은 200 이고, 카드마다 FE Card 의 열여섯 칸과 bufferWarning(목록에서는 null) 이 있다")
+  @DisplayName("목록은 200 이고, 카드마다 FE Card 의 열일곱 칸과 bufferWarning(목록에서는 null) 이 있다")
   void getCards() throws Exception {
     given(cardService.getCards(OCT_12)).willReturn(List.of(MATH));
 
@@ -106,13 +107,15 @@ class CardControllerTest {
         .andExpect(jsonPath("$[0].checklist[0].text").value("42~45쪽"))
         .andExpect(jsonPath("$[0].priority").value("flexible"))
         .andExpect(jsonPath("$[0].type").value("self"))
+        // 카드의 과목 번호도 글자로 보냅니다. (이슈 #404)
+        .andExpect(jsonPath("$[0].subjectId").value("3"))
         .andExpect(jsonPath("$[0].createdAt").value(1790000000000L))
         // 값이 없는 칸은 빼지 않고 null 로 보냅니다. (docs/API.md 4장)
         .andExpect(jsonPath("$[0].goalId").isEmpty())
         .andExpect(jsonPath("$[0].alert").isEmpty())
         // 버퍼 경고는 만들기 · 바꾸기 응답에만 있어서, 목록에서는 빼지 않고 null 로 보냅니다. (이슈 #223)
         .andExpect(jsonPath("$[0].bufferWarning").isEmpty())
-        .andExpect(jsonPath("$[0].length()").value(17))
+        .andExpect(jsonPath("$[0].length()").value(18))
         .andExpect(jsonPath("$[0].userId").doesNotExist());
   }
 
@@ -169,6 +172,7 @@ class CardControllerTest {
                 null,
                 null,
                 null,
+                null,
                 new CardAlertRequest("call", 10, null),
                 null));
   }
@@ -202,6 +206,7 @@ class CardControllerTest {
         Arguments.of("{" + VALID_CARD + ",\"repeatDays\":[-1]}", "반복 요일은 0(일) ~ 6(토) 으로 보내 주세요"),
         Arguments.of("{" + VALID_CARD + ",\"startTime\":\"7:00\"}", "시작 시각은 19:00 처럼 보내 주세요"),
         Arguments.of("{" + VALID_CARD + ",\"goalId\":\"abc\"}", "목표 번호가 올바르지 않아요"),
+        Arguments.of("{" + VALID_CARD + ",\"subjectId\":\"수학\"}", "과목 번호가 올바르지 않아요"),
         Arguments.of("{" + VALID_CARD + ",\"expectedDone\":-1}", "예상 달성 개수는 0 이상이어야 해요"),
         Arguments.of(
             "{" + VALID_CARD + ",\"expectedFailCauses\":[\"a\",\"b\",\"c\",\"d\",\"e\",\"f\"]}",
@@ -233,13 +238,15 @@ class CardControllerTest {
   void update() throws Exception {
     given(cardService.update(eq(7L), any())).willReturn(MATH);
 
-    send(patch("/api/v1/cards/7"), "{\"repeatDays\":[],\"startTime\":\"\",\"goalId\":\"\"}")
+    send(
+            patch("/api/v1/cards/7"),
+            "{\"repeatDays\":[],\"startTime\":\"\",\"goalId\":\"\",\"subjectId\":\"\"}")
         .andExpect(status().isOk());
     verify(cardService)
         .update(
             7L,
             new CardUpdateRequest(
-                null, null, List.of(), "", null, null, "", null, null, null, null, null, null,
+                null, null, List.of(), "", null, null, "", "", null, null, null, null, null, null,
                 null));
   }
 
@@ -249,7 +256,8 @@ class CardControllerTest {
         Arguments.of("{\"durationMinutes\":601}", "카드 길이는 600분(10시간) 이하여야 해요"),
         Arguments.of("{\"checklist\":[]}", "체크리스트는 1개 이상 20개까지 적을 수 있어요"),
         Arguments.of("{\"startTime\":\"24:00\"}", "시작 시각은 19:00 처럼 보내 주세요"),
-        Arguments.of("{\"goalId\":\"9999999999999999999\"}", "목표 번호가 올바르지 않아요"));
+        Arguments.of("{\"goalId\":\"9999999999999999999\"}", "목표 번호가 올바르지 않아요"),
+        Arguments.of("{\"subjectId\":\"-3\"}", "과목 번호가 올바르지 않아요"));
   }
 
   @ParameterizedTest(name = "{1}")
