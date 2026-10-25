@@ -10,11 +10,12 @@ import java.util.List;
 // 카드 한 장을 FE 에 알려 주는 모양입니다. FE 의 Card 와 같은 이름을 씁니다.
 //   { "id": "7", "title": "수학 문제집", "date": "2026-10-12", "repeatDays": [1, 3],
 //     "startTime": "19:00", "durationMinutes": 60,
-//     "checklist": [ { "id": "i1", "text": "42~45쪽" } ], "goalId": null,
+//     "checklist": [ { "id": "i1", "text": "42~45쪽" } ], "goalId": null, "subjectId": "3",
 //     "priority": "flexible", "type": "self", "expectedDone": null, "expectedDoneReason": null,
 //     "expectedFailCauses": null, "alert": null, "planningMs": null, "createdAt": 1790000000000,
 //     "bufferWarning": null }
-// - id, goalId 는 FE 타입이 글자(string)라서 숫자를 글자로 바꿔 보냅니다.
+// - id, goalId, subjectId 는 FE 타입이 글자(string)라서 숫자를 글자로 바꿔 보냅니다.
+// - subjectId 는 카드의 과목입니다. "과목 없음" 이면 null 입니다. (이슈 #404)
 // - 1회성 카드는 repeatDays 가 null, 예상 실패 원인이 없으면 expectedFailCauses 가 null 입니다. (값이 없는 칸은 null)
 // - alert 가 null 이면 기본 알림(정각 · 메시지 · 기본 문구)입니다.
 // - createdAt 은 밀리초 숫자입니다. (docs/API.md 2-2)
@@ -31,6 +32,7 @@ public record CardResponse(
     int durationMinutes,
     List<ChecklistItemResponse> checklist,
     String goalId,
+    String subjectId,
     String priority,
     String type,
     Integer expectedDone,
@@ -78,6 +80,7 @@ public record CardResponse(
         card.getDurationMinutes(),
         checklist,
         card.getGoalId() == null ? null : String.valueOf(card.getGoalId()),
+        card.getSubjectId() == null ? null : String.valueOf(card.getSubjectId()),
         card.getPriority().toValue(),
         card.getType().toValue(),
         card.getExpectedDone(),

@@ -1,6 +1,7 @@
 package com.ithopeschool.projectbe.domain.call;
 
 import com.ithopeschool.projectbe.domain.ai.CardPhotoService;
+import com.ithopeschool.projectbe.domain.ai.DayPlanService;
 import com.ithopeschool.projectbe.domain.ai.LongPlan;
 import com.ithopeschool.projectbe.domain.ai.StudyBlock;
 import com.ithopeschool.projectbe.domain.call.dto.CallFinishRequest;
@@ -36,7 +37,7 @@ import org.springframework.stereotype.Service;
 // 상담 채팅 로직입니다. "글로 하는 통화" 입니다. (이슈 #238, 기획서 4.5 「상담」)
 // 통화를 못 받은 날에도 같은 흐름이 이어지도록, 통화와 같은 대본(CallScript)과 같은 기록(call_records)을 씁니다.
 //
-//   1. 채팅 열기 (start)     통화와 같은 순서로 대본을 만들고(CallService.prepareScript, 학생 카드는 DB),
+//   1. 채팅 열기 (start)     통화와 같은 순서로 대본을 만들고(CallService.prepareChatScript, 학생 카드는 DB),
 //                           오늘 학교 정보(시간표 · 급식 · 학사일정)를 붙여 AI 의 첫 인사를 받는다
 //                           greet 이 false 면 첫 인사 없이 채팅 번호만 만든다 (채팅 수정 1)
 //   2. 말 보내기 (send)      학생의 말을 위기 표현 검사 → 걸리면 GPT 를 부르지 않고 정해 둔 안내로 답한다
@@ -50,6 +51,10 @@ import org.springframework.stereotype.Service;
 //
 // 방 3개 (2026-10-18 "📅 계획 · 💬 상담 · 📚 과목 쌤"): 열 때 request.room 으로 방을 고릅니다. 없으면 상담(COACH)입니다.
 // 방은 대본 끝에 [이번 방] 칸을 붙여 바꾸고(ChatRoom.section), 과목 쌤은 학생 성향 칸을 붙이지 않습니다.
+// 계획 방은 대본에서 [통화 순서] · [생각 습관] 을 빼고(CallService.prepareChatScript), 답 모양 규칙도 따로 씁니다.
+// (ChatAiClient.turnForPlanner — 두세 문장 제한 대신 다섯 문장 · 짧은 목록, day_plan 행동. 2026-10-25 #431)
+// 계획 방은 AI 를 부를 때마다 [오늘 쓸 수 있는 시간] 칸(PlannerTime — 고정 일정 · 기상/취침 · 빈 시간 · 오늘 카드)을
+// 새로 만들어 그 한 번의 답에만 붙입니다. 기억해 둔 대본에는 넣지 않아서, 학생이 방금 만든 카드도 다음 답에 보입니다.
 //
 // 사진 질문 (2026-10-18): 말 보내기에 사진(request.image)이 붙으면 그 한 번의 답에만 사진을 AI 에 같이 보내고,
 // 대본 끝에 방마다 다른 [이번 말에 붙은 사진] 칸(ChatRoom.imageRule)을 잠깐 붙입니다. 사진은 저장 · 로그 안 함.
@@ -95,8 +100,11 @@ public class ChatService {
   // 빠른 답 버튼은 이만큼까지, 한 버튼은 이 글자 수까지
   static final int MAX_QUICK_REPLIES = 3;
   static final int MAX_QUICK_REPLY_LENGTH = 20;
-  // 행동 버튼 make_plan 의 목표 · start_quiz 의 주제는 이 글자 수까지
+  // 행동 버튼 make_plan 의 목표 · start_quiz 의 주제 · day_plan 의 먼저 할 것은 이 글자 수까지
   static final int MAX_ACTION_TOPIC_LENGTH = 30;
+  // 행동 버튼 day_plan 의 하루 총 공부 분은 이 범위만 (AI 하루 계획 요청의 totalMinutes 와 같은 범위, #431)
+  static final int MIN_DAY_PLAN_MINUTES = 20;
+  static final int MAX_DAY_PLAN_MINUTES = 600;
   // AI 가 짐작한 이유 값(tags)은 이만큼까지
   static final int MAX_TAGS = 3;
   // 인사 없이 여는 채팅(greet=false)은 하루에 이만큼까지 (checkOpenLimit)
@@ -120,6 +128,8 @@ public class ChatService {
   private final CurriculumService curriculumService;
   // 과목 쌤 방의 웹 검색 켜기 · 출처 검사 (2026-10-18)
   private final TutorWebSearch tutorWebSearch;
+  // 계획 방의 [오늘 쓸 수 있는 시간] 칸 재료. AI 하루 계획과 같은 계산입니다. (#431)
+  private final DayPlanService dayPlanService;
   private final Clock clock;
 
   // 채팅을 엽니다. 요청 모양은 통화 시작(POST /realtime/session)과 같습니다. (학년 · 반 없이)
@@ -163,8 +173,7 @@ public class ChatService {
       checkAiEnabled();
       checkOpenLimit(userId, today);
     }
-    CallService.Script script =
-        callService.prepareScript(userId, request, now, today, CallChannel.CHAT);
+    CallService.Script script = callService.prepareChatScript(userId, request, now, today, room);
 
     // 통화와 같은 대본 끝에 "학생 성향" · "오늘 학교" 칸을 붙입니다. 없으면 붙이지 않습니다.
     // 성향은 학생마다 말 거는 방법을 다르게 하려고 넣습니다. (시작을 미루는 학생에게는 '5분만' 처럼)
@@ -201,19 +210,21 @@ public class ChatService {
             + topicPart;
     // 인사 없이 열면 first 는 null 입니다.
     ChatAiClient.ChatTurn first = null;
-    if (greet) {
+    if (greet && room == ChatRoom.TUTOR) {
       first =
-          room == ChatRoom.TUTOR
-              ? askTutor(
-                  userId,
-                  // 주제(틀린 문제 등)로 열었으면 그 사실 줄로 성취기준을 고릅니다.
-                  instructions
-                      + curriculumService.standardsSection(
-                          curriculum, about == null ? "" : String.join(" ", about.lines())),
-                  List.of(),
-                  topic,
-                  null)
-              : askAi(instructions, List.of(), topic);
+          askTutor(
+              userId,
+              // 주제(틀린 문제 등)로 열었으면 그 사실 줄로 성취기준을 고릅니다.
+              instructions
+                  + curriculumService.standardsSection(
+                      curriculum, about == null ? "" : String.join(" ", about.lines())),
+              List.of(),
+              topic,
+              null);
+    } else if (greet && room == ChatRoom.PLANNER) {
+      first = askPlanner(instructions + plannerTimeSection(), List.of(), topic, null);
+    } else if (greet) {
+      first = askAi(instructions, List.of(), topic);
     }
     // AI 의 첫 인사를 받은 뒤에 기록을 만듭니다. 못 받았으면 채팅이 열리지 않은 것이라 기록도 남기지 않습니다.
     CallRecord record =
@@ -237,18 +248,14 @@ public class ChatService {
   // 대본에는 주제 칸을 붙이지 않고 "들어 주기만" 칸을 붙여서, 이어지는 대화가 공부 이야기로 가지 않게 합니다.
   private ChatReplyResponse startInCrisis(
       Long userId, CallSessionRequest request, Instant now, LocalDate today) {
-    CallService.Script script =
-        callService.prepareScript(userId, request, now, today, CallChannel.CHAT);
+    ChatRoom room = ChatRoom.from(request.room()).orElse(ChatRoom.COACH);
+    CallService.Script script = callService.prepareChatScript(userId, request, now, today, room);
     CallRecord record = new CallRecord(userId, today, now, script.biasQuestion(), CallChannel.CHAT);
     record.markCrisis();
     record = callRecordRepository.save(record);
     safetyService.activate(userId);
     chatScriptStore.save(
-        record.getId(),
-        userId,
-        script.instructions() + CRISIS_FOLLOW_UP,
-        null,
-        ChatRoom.from(request.room()).orElse(ChatRoom.COACH));
+        record.getId(), userId, script.instructions() + CRISIS_FOLLOW_UP, null, room);
     return ChatReplyResponse.crisis(record.getId(), CHAT_CRISIS_REPLY);
   }
 
@@ -298,6 +305,11 @@ public class ChatService {
     checkAiReady(userId);
     // 방을 잊었으면 코치로 봅니다. 사진 규칙 · 성취기준 칸은 이번 한 번의 답에만 붙이고 기억해 둔 대본에는 남기지 않습니다.
     ChatRoom room = chatScriptStore.findRoom(chatId, userId).orElse(ChatRoom.COACH);
+    // 계획 방이면 [오늘 쓸 수 있는 시간] 칸을 새로 만들어 이번 한 번의 답에만 붙입니다. (#431)
+    // 위기 표현이 나온 채팅에는 붙이지 않습니다. 남은 대화는 공부 · 계획 이야기 없이 들어 주기만 해야 해서입니다.
+    if (room == ChatRoom.PLANNER && !chat.isCrisisDetected()) {
+      instructions += plannerTimeSection();
+    }
     // [이미 한 말] 칸은 고정 문장이라 FE 가 보낸 글자가 지시에 들어가지 않습니다. (RepeatCheck.section)
     String alreadySaid = RepeatCheck.section(lines);
     ChatAiClient.ChatTurn next =
@@ -347,6 +359,11 @@ public class ChatService {
       String imageRule = image == null ? "" : room.imageRule();
       return askTutor(
           userId, instructions + standards + imageRule + alreadySaid, lines, topic, image);
+    }
+    if (room == ChatRoom.PLANNER) {
+      // 계획 방: 사진이 있으면 사진 규칙을 붙이고, 계획 방의 답 모양으로 받습니다. (#431)
+      String imageRule = image == null ? "" : room.imageRule();
+      return askPlanner(instructions + imageRule + alreadySaid, lines, topic, image);
     }
     if (image == null) {
       return askAi(instructions + alreadySaid, lines, topic);
@@ -423,6 +440,22 @@ public class ChatService {
   private ChatAiClient.ChatTurn askAiWithImage(
       String instructions, List<CallFinishRequest.Line> lines, ChatTopic topic, String image) {
     Optional<ChatAiClient.ChatTurn> turn = chatAiClient.turnWithImage(instructions, lines, image);
+    if (turn.isEmpty()) {
+      throw new ApiException(ErrorCode.SERVICE_UNAVAILABLE, "AI 와 연결하지 못했어요. 잠시 후 다시 시도해 주세요");
+    }
+    return cleanTurn(turn.get(), DayRule.dateOf(clock.instant()), topic);
+  }
+
+  // 계획 방의 [오늘 쓸 수 있는 시간] 칸. 하루 계획과 같은 계산(DayPlanService.todayTime)으로 지금 만듭니다. (#431)
+  private String plannerTimeSection() {
+    return PlannerTime.section(dayPlanService.todayTime());
+  }
+
+  // 계획 방의 답. 대본 끝에 계획 방의 답 모양(다섯 문장 · 짧은 목록, day_plan)을 붙입니다. (#431)
+  // image 는 학생의 마지막 말에 붙은 사진(없으면 null)입니다. 못 받았으면 503 입니다.
+  private ChatAiClient.ChatTurn askPlanner(
+      String instructions, List<CallFinishRequest.Line> lines, ChatTopic topic, String image) {
+    Optional<ChatAiClient.ChatTurn> turn = chatAiClient.turnForPlanner(instructions, lines, image);
     if (turn.isEmpty()) {
       throw new ApiException(ErrorCode.SERVICE_UNAVAILABLE, "AI 와 연결하지 못했어요. 잠시 후 다시 시도해 주세요");
     }
@@ -530,11 +563,17 @@ public class ChatService {
   //   make_plan    : 목표 1 ~ 30자(깎아내리는 말 없음). 마감 날은 내일 ~ 30일 뒤만 (긴 계획 /ai/long-plan 의 범위).
   //                  모양이 틀리거나 범위 밖이면 버튼은 두고 date 만 null (FE 가 날짜를 다시 물음)
   //   start_quiz   : 주제 1 ~ 30자(깎아내리는 말 없음)
+  //   day_plan     : 계획 방의 "오늘 계획 짜 줘" (2026-10-25 #431). 버튼은 늘 두고, 칸마다 틀린 것만 null 로 바꿉니다.
+  //                  minutes(하루 총 분)는 20 ~ 600 이 아니면 null, startTime 은 "HH:mm" 이 아니면 null,
+  //                  title(먼저 할 것)은 비었거나 깎아내리는 말이 있으면 null · 30자가 넘으면 30자로 자름. date 는 늘 null.
+  //                  null 인 칸은 FE 가 보내지 않고, 서버(/ai/day-plan)가 기록으로 정합니다.
   //
   //   today = 2026-10-18
   //   make_plan "중간고사 미적분", "2026-11-02"  →  그대로
   //   make_plan "중간고사 미적분", "2026-12-25"  →  date 만 null (30일 넘음)
   //   start_quiz "  "                           →  null
+  //   day_plan 120, " 수학 먼저 ", "21:00"         →  120, "수학 먼저", "21:00"
+  //   day_plan 900, "", "9시"                     →  null, null, null (버튼은 그대로)
   static ChatReplyResponse.Action cleanAction(ChatReplyResponse.Action action, LocalDate today) {
     if (action == null || action.type() == null) {
       return null;
@@ -567,9 +606,44 @@ public class ChatService {
       case "start_quiz":
         String topic = topicOf(action.title());
         return topic == null ? null : new ChatReplyResponse.Action("start_quiz", null, topic);
+      case "day_plan":
+        return new ChatReplyResponse.Action(
+            "day_plan",
+            dayPlanMinutesOf(action.minutes()),
+            firstThingOf(action.title()),
+            null,
+            startTimeOf(action.startTime()));
       default:
         return null;
     }
+  }
+
+  // day_plan 의 하루 총 공부 분. 20 ~ 600 이 아니면 null
+  private static Integer dayPlanMinutesOf(Integer minutes) {
+    if (minutes == null || minutes < MIN_DAY_PLAN_MINUTES || minutes > MAX_DAY_PLAN_MINUTES) {
+      return null;
+    }
+    return minutes;
+  }
+
+  // day_plan 의 먼저 할 것 한 줄. 비었거나 깎아내리는 말이 있으면 null, 30자가 넘으면 30자로 자릅니다.
+  //   " 수학\n먼저 " → "수학 먼저"
+  private static String firstThingOf(String raw) {
+    String text = raw == null ? "" : raw.replaceAll("\\s+", " ").trim();
+    if (text.isEmpty() || ToneGuide.hasBannedExpression(text)) {
+      return null;
+    }
+    return CallScript.cutKeepingEmoji(text, MAX_ACTION_TOPIC_LENGTH);
+  }
+
+  // day_plan 의 시작 시각. "HH:mm"(00:00 ~ 23:59)이 아니면 null
+  //   "21:00" → "21:00",  "9시" · "25:00" · "9:00" → null
+  static String startTimeOf(String raw) {
+    if (raw == null) {
+      return null;
+    }
+    String text = raw.trim();
+    return text.matches("([01]\\d|2[0-3]):[0-5]\\d") ? text : null;
   }
 
   // 목표 · 주제 한 줄. 비었거나 30자를 넘거나 깎아내리는 말이 있으면 null

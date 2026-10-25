@@ -21,6 +21,6 @@ public enum GptUsageKind {
   ASSIST,
   // 변형 문제: 변형 생성 · 원본 분류 · 독립 풀이 검사 (GptVariantAi, docs/VARIANT-SPEC.md)
   //   변형 하나에 AI 호출이 여러 번(최대 3번 + 검사)이라 비용을 따로 보려고 종류를 나눴습니다.
-  //   운영 DB 의 허용값은 db/migrations/19-variant-problems.sql 이 늘립니다.
+  //   운영 DB 의 허용값은 db/migrations/22-variant-problems.sql 이 늘립니다.
   VARIANT
 }

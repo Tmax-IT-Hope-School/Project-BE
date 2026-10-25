@@ -41,7 +41,7 @@ class StudyQuizServiceTest {
 
   private static final StudyQuiz.Answer.Item ITEM =
       new StudyQuiz.Answer.Item(
-          "lim (n→∞) 1/n 의 값은?", List.of("0", "1", "∞", "없다"), 0, "0 에 가까워져.");
+          "lim (n→∞) 1/n 의 값은?", List.of("0", "1", "∞", "없다"), 0, "0 에 가까워져.", null);
 
   private static StudyQuizRequest request(String topic, String material, String image) {
     return new StudyQuizRequest(topic, null, material, image, null);
@@ -86,8 +86,33 @@ class StudyQuizServiceTest {
     assertThat(made.questions())
         .containsExactly(
             new StudyQuiz.Question(
-                "lim (n→∞) 1/n 의 값은?", List.of("0", "1", "∞", "없다"), 0, "0 에 가까워져."));
+                "lim (n→∞) 1/n 의 값은?", List.of("0", "1", "∞", "없다"), 0, "0 에 가까워져.", null));
     verify(aiClient, never()).askWithImage(any(), any(), any(), any(), any());
+  }
+
+  @Test
+  @DisplayName("사진에서 옮긴 지문은 그대로 돌려주고, 지문에 위기 표현이 있으면 showHelp")
+  void passageFromPhoto() {
+    StudyQuiz.Answer.Item reading =
+        new StudyQuiz.Answer.Item(
+            "윗글의 중심 내용은?",
+            List.of("봄", "여름", "가을", "겨울"),
+            0,
+            "첫 문장이 봄을 말해.",
+            "봄이 오면 산에 들에 진달래 피네.");
+    StudyQuiz.Answer.Item crisis =
+        new StudyQuiz.Answer.Item(
+            "윗글의 중심 내용은?", List.of("봄", "여름", "가을", "겨울"), 0, "첫 문장을 봐.", "오늘은 그냥 죽고 싶어.");
+    given(
+            aiClient.askWithImage(
+                eq(USER_ID), eq(GptUsageKind.ASSIST), any(), eq(IMAGE), eq(StudyQuiz.Answer.class)))
+        .willReturn(Optional.of(new StudyQuiz.Answer(false, false, List.of(reading))))
+        .willReturn(Optional.of(new StudyQuiz.Answer(false, false, List.of(crisis))));
+
+    assertThat(service.make(request("국어 비문학", null, IMAGE)).questions())
+        .extracting(StudyQuiz.Question::passage)
+        .containsExactly("봄이 오면 산에 들에 진달래 피네.");
+    assertThat(service.make(request("국어 비문학", null, IMAGE))).isEqualTo(StudyQuizResponse.help());
   }
 
   @Test

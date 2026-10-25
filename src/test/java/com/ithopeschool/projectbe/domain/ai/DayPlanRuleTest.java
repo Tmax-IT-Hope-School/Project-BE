@@ -40,6 +40,39 @@ class DayPlanRuleTest {
     assertThat(DayPlanRule.totalMinutesOf(List.of(), 60, false, 90).minutes()).isZero();
   }
 
+  @Test
+  @DisplayName("계획 방에서 학생이 정한 총량은 그대로 쓰고(30분보다 적으면 30분), 이미 있는 카드 시간만 뺀다 (#431)")
+  void chosenTotal() {
+    DayPlanRule.Total total = DayPlanRule.chosenTotalOf(120, 0);
+    assertThat(total.minutes()).isEqualTo(120);
+    assertThat(total.basis()).isEqualTo("계획 방에서 정한 대로");
+    assertThat(total.evidence()).containsExactly("계획 방에서 오늘 120분 하기로 해서 그만큼 잡았어요");
+
+    // 기록 평균 · 계획 낙관으로 바꾸지 않습니다. 75분처럼 10분 단위가 아니어도 그대로입니다.
+    assertThat(DayPlanRule.chosenTotalOf(75, 0).minutes()).isEqualTo(75);
+    // 한 칸은 30분 이상이라 20분은 30분으로
+    DayPlanRule.Total small = DayPlanRule.chosenTotalOf(20, 0);
+    assertThat(small.minutes()).isEqualTo(30);
+    assertThat(small.evidence()).contains("한 칸은 30분 이상이라 30분으로 잡았어요");
+    // 오늘 이미 있는 카드까지 합친 총량이라 카드 시간을 뺍니다.
+    DayPlanRule.Total withCards = DayPlanRule.chosenTotalOf(120, 60);
+    assertThat(withCards.minutes()).isEqualTo(60);
+    assertThat(withCards.evidence()).contains("그날 이미 있는 카드 60분을 뺐어요");
+    assertThat(DayPlanRule.chosenTotalOf(90, 120).minutes()).isZero();
+  }
+
+  @Test
+  @DisplayName("학생이 정한 시작 시각 전은 빼고, 이미 그보다 늦으면 그대로, 끝보다 늦으면 빈 시간이 없다 (#431)")
+  void startingAt() {
+    DayPlanRule.Span window = span(8, 0, 23, 0);
+
+    assertThat(DayPlanRule.startingAt(window, LocalTime.of(21, 0))).isEqualTo(span(21, 0, 23, 0));
+    assertThat(DayPlanRule.startingAt(window, LocalTime.of(7, 0))).isEqualTo(window);
+    DayPlanRule.Span late = DayPlanRule.startingAt(window, LocalTime.of(23, 30));
+    assertThat(late).isEqualTo(span(23, 30, 23, 30));
+    assertThat(DayPlanRule.freeSlotsOf(late, List.of())).isEmpty();
+  }
+
   // ---- 시각 ----
 
   @Test

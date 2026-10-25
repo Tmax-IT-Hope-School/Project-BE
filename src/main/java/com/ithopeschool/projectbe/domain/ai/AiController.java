@@ -28,6 +28,8 @@ import com.ithopeschool.projectbe.domain.ai.dto.LongPlanRequest;
 import com.ithopeschool.projectbe.domain.ai.dto.LongPlanResponse;
 import com.ithopeschool.projectbe.domain.ai.dto.LongPlanReviseRequest;
 import com.ithopeschool.projectbe.domain.ai.dto.ProfileLinesResponse;
+import com.ithopeschool.projectbe.domain.ai.dto.ProofPhotoRequest;
+import com.ithopeschool.projectbe.domain.ai.dto.ProofPhotoResponse;
 import com.ithopeschool.projectbe.domain.ai.dto.QuickCardRequest;
 import com.ithopeschool.projectbe.domain.ai.dto.QuickCardResponse;
 import com.ithopeschool.projectbe.domain.ai.dto.RoutineCardRequest;
@@ -67,6 +69,7 @@ public class AiController {
   private final ProfileLinesService profileLinesService;
   private final CardParseService cardParseService;
   private final CardPhotoService cardPhotoService;
+  private final ProofPhotoService proofPhotoService;
   private final CardDefaultsService cardDefaultsService;
   private final SelfAnalysisService selfAnalysisService;
   private final DayPlanService dayPlanService;
@@ -145,6 +148,14 @@ public class AiController {
   @PostMapping("/cards/from-photo")
   public CardPhotoResponse cardsFromPhoto(@Valid @RequestBody CardPhotoRequest request) {
     return cardPhotoService.make(request);
+  }
+
+  @Operation(
+      summary =
+          "사진으로 증빙 적기: 공부한 사진 한 장 → 무엇을 했는지 한 줄 (image 는 data URL · 4MB 이하 · 사진 저장 안 함 · 공부 흔적이 안 보이면 summary: null · 토큰 필요)")
+  @PostMapping("/proof-from-photo")
+  public ProofPhotoResponse proofFromPhoto(@Valid @RequestBody ProofPhotoRequest request) {
+    return proofPhotoService.summarize(request);
   }
 
   @Operation(

@@ -67,6 +67,11 @@ class AnswerGradingTest {
     assertThat(marked.instructions()).contains("문제를 직접 풀지 마", "markRead", "UNSURE");
     assertThat(unmarked.instructions()).contains("문제를 직접 풀고", "자신이 없으면 무조건 UNSURE");
     assertThat(unmarked.instructions()).contains("개인정보", "crisis");
+    // 답이 하나도 없는 문제 페이지도 problemPage 는 true 여야 합니다. (2026-10-24 전부 NOT_PROBLEM 이 된 원인)
+    assertThat(unmarked.instructions()).contains("학생이 답을 하나도 안 썼거나 채점 표시가 없어도 true");
+    assertThat(unmarked.instructions()).doesNotContain("번호가 붙은 문제와 학생이 쓴 답이 있으면 true");
+    assertThat(unmarked.instructions()).contains("학생이 답을 안 쓴 문제도 빼지 말고 items 에 넣어");
+    assertThat(marked.instructions()).contains("O · X 표시가 없는 문제도 빼지 말고 items 에 넣어");
     assertThat(marked.input()).contains("채점함");
     assertThat(unmarked.input()).contains("채점하지 않음");
     assertThat(marked.schema()).containsKey("properties");

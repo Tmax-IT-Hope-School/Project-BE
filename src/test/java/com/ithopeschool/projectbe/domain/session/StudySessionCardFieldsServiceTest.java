@@ -24,6 +24,8 @@ import com.ithopeschool.projectbe.domain.session.dto.SessionMemoRequest;
 import com.ithopeschool.projectbe.domain.session.dto.SessionPauseRequest;
 import com.ithopeschool.projectbe.domain.session.dto.StudySessionCreateRequest;
 import com.ithopeschool.projectbe.domain.session.dto.StudySessionResponse;
+import com.ithopeschool.projectbe.domain.subject.Subject;
+import com.ithopeschool.projectbe.domain.subject.SubjectColor;
 import com.ithopeschool.projectbe.domain.subject.SubjectRepository;
 import com.ithopeschool.projectbe.global.auth.CurrentUserProvider;
 import com.ithopeschool.projectbe.global.exception.ApiException;
@@ -56,6 +58,7 @@ class StudySessionCardFieldsServiceTest {
 
   private StudySessionRepository studySessionRepository;
   private CardRepository cardRepository;
+  private SubjectRepository subjectRepository;
   private Stage4Service stage4Service;
   private StudySessionService studySessionService;
 
@@ -64,13 +67,14 @@ class StudySessionCardFieldsServiceTest {
     CurrentUserProvider currentUserProvider = mock(CurrentUserProvider.class);
     studySessionRepository = mock(StudySessionRepository.class);
     cardRepository = mock(CardRepository.class);
+    subjectRepository = mock(SubjectRepository.class);
     // 기본은 관리 4단계가 아닙니다. (4단계 테스트에서만 켭니다)
     stage4Service = mock(Stage4Service.class);
     studySessionService =
         new StudySessionService(
             currentUserProvider,
             studySessionRepository,
-            mock(SubjectRepository.class),
+            subjectRepository,
             mock(StudyPlanRepository.class),
             cardRepository,
             stage4Service,
@@ -386,6 +390,75 @@ class StudySessionCardFieldsServiceTest {
         .isInstanceOf(ApiException.class)
         .hasMessage("이미 저장된 기록과 시간이 겹쳐요");
     verify(studySessionRepository, never()).save(any());
+  }
+
+  // ---- 카드의 과목 (#404) ----
+
+  // 과목 3번을 붙인 내 카드 7번으로 바꿔 둡니다.
+  private void givenMyCardHasSubject3() {
+    Card card =
+        new Card(
+            ME,
+            "수학 문제집",
+            LocalDate.of(2026, 10, 12),
+            60,
+            List.of(new ChecklistItem("i1", "42쪽")),
+            NOW);
+    card.changeSubjectId(3L);
+    given(cardRepository.findByIdAndUserId(MY_CARD, ME)).willReturn(Optional.of(card));
+  }
+
+  // 카드 7번으로 켠 기록 요청. 과목 · 종류만 바꿔 씁니다.
+  private static StudySessionCreateRequest cardSessionWith(String subjectId, String kind) {
+    return new StudySessionCreateRequest(
+        subjectId, START, END, 0, null, null, 60, null, kind, "7", null, null, null, null, null,
+        null, null);
+  }
+
+  @Test
+  @DisplayName("과목 없이 카드로 켠 공부 기록은 카드의 과목으로 저장한다 (과목별 시간이 '기타' 로 묶이지 않게)")
+  void cardSubjectFillsEmptySubject() {
+    givenMyCardHasSubject3();
+
+    StudySessionResponse response = studySessionService.create(cardSessionWith("", "study"));
+
+    assertThat(savedSession().getSubjectId()).isEqualTo(3L);
+    assertThat(response.subjectId()).isEqualTo("3");
+  }
+
+  @Test
+  @DisplayName("과목을 보냈으면 카드의 과목보다 보낸 과목이 먼저다")
+  void sentSubjectWins() {
+    givenMyCardHasSubject3();
+    given(subjectRepository.findByIdAndUserId(4L, ME))
+        .willReturn(Optional.of(new Subject(ME, "영어", SubjectColor.RED)));
+
+    studySessionService.create(cardSessionWith("4", "study"));
+
+    assertThat(savedSession().getSubjectId()).isEqualTo(4L);
+  }
+
+  @Test
+  @DisplayName("카드에 과목이 없으면 지금처럼 과목 없이 저장하고, 노는 기록은 카드에 과목이 있어도 과목을 두지 않는다")
+  void noCardSubjectOrPlayStaysEmpty() {
+    // setUp 의 7번 카드는 과목이 없습니다.
+    studySessionService.create(cardSessionWith("", "study"));
+    assertThat(savedSession().getSubjectId()).isNull();
+
+    givenMyCardHasSubject3();
+    StudySessionResponse play = studySessionService.create(cardSessionWith(null, "play"));
+    assertThat(play.subjectId()).isEmpty();
+  }
+
+  @Test
+  @DisplayName("사후 입력도 카드의 과목으로 저장한다")
+  void selfReportUsesCardSubject() {
+    givenMyCardHasSubject3();
+
+    studySessionService.createSelfReport(
+        MY_CARD, 60, Instant.ofEpochMilli(START), Instant.ofEpochMilli(START + 50 * MINUTE), null);
+
+    assertThat(savedSession().getSubjectId()).isEqualTo(3L);
   }
 
   // ---- 노는 기록 ----
