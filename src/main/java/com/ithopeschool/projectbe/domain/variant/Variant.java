@@ -96,8 +96,14 @@ public class Variant {
   private String solution;
 
   // AI 가 쓴 Symja 계산 코드 (정답 검증용). 학생에게는 절대 보내지 않습니다
+  // 수학이 아닌 과목은 계산할 식이 없어서 빈 글자입니다
   @Column(nullable = false, length = MAX_CODE_LENGTH)
   private String verificationCode;
+
+  // 정답을 무엇으로 확인했는지 (SYMJA 계산 · AI_SOLVE 독립 풀이). ⚠️ 칸 이름은 AI 가 지었습니다 (docs/DB.md)
+  @Enumerated(EnumType.STRING)
+  @Column(nullable = false, length = 10)
+  private VariantVerificationMethod verificationMethod;
 
   // 검사(G1 ~ G7)마다 통과했는지와 사유 (JSON 글자)
   @Column(nullable = false, length = MAX_LOG_LENGTH)
@@ -146,6 +152,7 @@ public class Variant {
       String solution,
       String verificationCode,
       String verificationLog,
+      VariantVerificationMethod verificationMethod,
       VariantStatus status,
       String model,
       String promptVersion,
@@ -158,6 +165,7 @@ public class Variant {
     this.problemText = cut(problemText, MAX_PROBLEM_TEXT_LENGTH);
     this.solution = cut(solution, MAX_SOLUTION_LENGTH);
     this.verificationCode = cut(verificationCode, MAX_CODE_LENGTH);
+    this.verificationMethod = verificationMethod;
     this.verificationLog = cut(verificationLog, MAX_LOG_LENGTH);
     this.fingerprint = VariantFingerprint.of(this.problemText);
     this.status = status;
@@ -181,6 +189,7 @@ public class Variant {
       String solution,
       String verificationCode,
       String verificationLog,
+      VariantVerificationMethod verificationMethod,
       String model,
       String promptVersion,
       int generationAttempt,
@@ -195,6 +204,7 @@ public class Variant {
             solution,
             verificationCode,
             verificationLog,
+            verificationMethod,
             VariantStatus.VERIFIED,
             model,
             promptVersion,
@@ -217,6 +227,7 @@ public class Variant {
       String solution,
       String verificationCode,
       String verificationLog,
+      VariantVerificationMethod verificationMethod,
       String rejectionReason,
       String model,
       String promptVersion,
@@ -232,6 +243,7 @@ public class Variant {
             solution,
             verificationCode,
             verificationLog,
+            verificationMethod,
             VariantStatus.REJECTED,
             model,
             promptVersion,

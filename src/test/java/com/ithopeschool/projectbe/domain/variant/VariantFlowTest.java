@@ -9,6 +9,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.ithopeschool.projectbe.domain.variant.generate.ClassificationDraft;
 import com.ithopeschool.projectbe.domain.variant.generate.FakeVariantAi;
+import com.ithopeschool.projectbe.domain.variant.generate.SolveCheckDraft;
+import com.ithopeschool.projectbe.domain.variant.generate.TextVariantDraft;
 import com.ithopeschool.projectbe.domain.variant.generate.VariantDrafts;
 import com.jayway.jsonpath.JsonPath;
 import java.time.Instant;
@@ -72,6 +74,7 @@ class VariantFlowTest {
   @Autowired private AttemptRepository attemptRepository;
   @Autowired private WeeklySetRepository weeklySetRepository;
   @Autowired private WeeklySetService weeklySetService;
+  @Autowired private SourceProblemService sourceProblemService;
 
   @BeforeEach
   void cleanUp() {
@@ -627,5 +630,85 @@ class VariantFlowTest {
   void dateAndOwnership() throws Exception {
     send(get("/api/v1/variant/daily?date=2099-01-01"), null).andExpect(status().isBadRequest());
     answer("999999", "1").andExpect(status().isNotFound());
+  }
+
+  // ---- 수학이 아닌 과목 (docs/VARIANT-SPEC.md 2-1 · 3-4 · 6-4) ----
+
+  private static final String PASSAGE = "도시의 녹지는 여름철 기온을 낮춘다. 그러나 녹지를 늘리는 데에는 비용이 든다.";
+
+  // 확인 문제에서 온 국어 원본을 저장합니다. (성취기준으로 분류된 상태)
+  private SourceProblem saveKorean(String text, boolean correct, String standardCode) {
+    SourceProblem source =
+        new SourceProblem(
+            1L,
+            text,
+            List.of("가", "나", "다", "라"),
+            "가",
+            correct ? "가" : "나",
+            correct,
+            false,
+            clock.instant(),
+            clock.instant(),
+            SourceProblemOrigin.QUIZ,
+            PASSAGE);
+    source.markSupportedByStandard("공통국어1", standardCode, 0.9);
+    return sourceProblemRepository.save(source);
+  }
+
+  @Test
+  @DisplayName("수학 밖 과목: 틀린 국어 원본 → 다음 날 지문과 글 선지가 있는 변형을 내고, 맞히면 L1 로 오른다")
+  void otherSubjectDailyFlow() throws Exception {
+    SourceProblem source = saveKorean("윗글의 내용과 일치하는 것은?", false, "10공국1-02-01");
+    sourceProblemService.createReviewItemIfNeeded(source);
+
+    at("2026-10-25");
+    ai.willGenerateText(
+            new TextVariantDraft(
+                "윗글에서 녹지를 늘릴 때의 단점으로 말한 것은?",
+                List.of("기온이 오른다.", "비용이 든다.", "소음이 커진다.", "겨울에 춥다.", "공기가 나빠진다."),
+                1,
+                List.of("반대로 읽음", "", "글에 없음", "글에 없음", "글에 없음"),
+                "둘째 문장에 비용이 든다고 나와 있다.",
+                "L0"))
+        .willSolve(new SolveCheckDraft(1, null, "둘째 문장"));
+    runJob(VariantDailyJob.NAME);
+
+    String day = daily();
+    assertThat((String) JsonPath.read(day, "$.items[0].passage")).isEqualTo(PASSAGE);
+    assertThat((String) JsonPath.read(day, "$.items[0].format")).isEqualTo("mc5");
+    assertThat((List<String>) JsonPath.read(day, "$.items[0].choicesLatex"))
+        .containsExactlyInAnyOrder("기온이 오른다.", "비용이 든다.", "소음이 커진다.", "겨울에 춥다.", "공기가 나빠진다.");
+    // 답을 내기 전에는 정답 · 해설이 없습니다.
+    assertThat(day).doesNotContain("둘째 문장에 비용이");
+
+    Variant variant = variantRepository.findAll().getFirst();
+    assertThat(variant.getVerificationMethod()).isEqualTo(VariantVerificationMethod.AI_SOLVE);
+    answer(JsonPath.read(day, "$.items[0].assignmentId"), String.valueOf(variant.getAnswerIndex()))
+        .andExpect(jsonPath("$.isCorrect").value(true))
+        .andExpect(jsonPath("$.correctAnswerLatex").value("비용이 든다."))
+        .andExpect(jsonPath("$.reviewItem.currentLevel").value(1));
+  }
+
+  @Test
+  @DisplayName("수학 밖 과목: 주간 (A) 는 성취기준 코드를 유형으로 보고, 수학 유형과 함께 많은 순으로 고른다")
+  void weeklyCorrectTypesByStandard() throws Exception {
+    // 돌아보는 주: 2026-10-19(월) ~ 10-25(일). 국어 02-01 2개, 국어 01-01 1개(더 최근), 수학 T01 1개
+    clock.set(Instant.parse("2026-10-20T00:00:00Z"));
+    saveKorean("국어 A1", true, "10공국1-02-01");
+    clock.set(Instant.parse("2026-10-21T00:00:00Z"));
+    register("수학 T01", true, "CM1-U05-T01");
+    clock.set(Instant.parse("2026-10-22T00:00:00Z"));
+    SourceProblem latestA = saveKorean("국어 A2", true, "10공국1-02-01");
+    clock.set(Instant.parse("2026-10-23T00:00:00Z"));
+    saveKorean("국어 B1", true, "10공국1-01-01");
+
+    List<String> texts =
+        weeklySetService.pickCorrectTypes(1L, LocalDate.parse("2026-10-19")).stream()
+            .map(p -> sourceProblemRepository.findById(p.sourceProblemId()).orElseThrow())
+            .map(SourceProblem::getProblemText)
+            .toList();
+
+    // 국어 02-01(2개, 대표는 최근 것) → 1개짜리 중 최근 순(국어 01-01 → 수학 T01)
+    assertThat(texts).containsExactly(latestA.getProblemText(), "국어 B1", "수학 T01");
   }
 }

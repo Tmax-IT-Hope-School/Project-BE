@@ -61,6 +61,7 @@ public class VariantQueryService {
         assignmentRepository.findByUserIdAndKindAndAssignedDateOrderByIdAsc(
             userId, AssignmentKind.DAILY, target);
     Map<Long, Variant> variants = variantsOf(assignments);
+    Map<Long, SourceProblem> sources = sourcesOf(assignments);
     List<DailyResponse.Item> items = new ArrayList<>();
     for (Assignment assignment : assignments) {
       Variant variant = variants.get(assignment.getVariantId());
@@ -69,6 +70,7 @@ public class VariantQueryService {
               String.valueOf(assignment.getId()),
               variant.getLevel(),
               variant.getFormat().toJson(),
+              passageOf(sources, assignment),
               variant.getProblemText(),
               choicesLatex(variant),
               effectiveStatus(assignment, today)));
@@ -95,6 +97,7 @@ public class VariantQueryService {
         Comparator.comparing((Assignment a) -> a.getKind() == AssignmentKind.WEEKLY_WRONG_DEEP)
             .thenComparing(Assignment::getId));
     Map<Long, Variant> variants = variantsOf(assignments);
+    Map<Long, SourceProblem> sources = sourcesOf(assignments);
 
     List<WeeklyResponse.Item> items = new ArrayList<>();
     for (int i = 0; i < assignments.size(); i++) {
@@ -117,6 +120,7 @@ public class VariantQueryService {
               String.valueOf(assignment.getId()),
               assignment.getKind() == AssignmentKind.WEEKLY_CORRECT_TYPE ? "a" : "b",
               variant.getFormat().toJson(),
+              passageOf(sources, assignment),
               variant.getProblemText(),
               choicesLatex(variant),
               status,
@@ -167,6 +171,20 @@ public class VariantQueryService {
         .findAllById(assignments.stream().map(Assignment::getVariantId).toList())
         .stream()
         .collect(Collectors.toMap(Variant::getId, Function.identity()));
+  }
+
+  // 과제들의 원본 (지문을 보여 주려고 읽습니다)
+  private Map<Long, SourceProblem> sourcesOf(List<Assignment> assignments) {
+    return sourceProblemRepository
+        .findAllById(assignments.stream().map(Assignment::getSourceProblemId).toList())
+        .stream()
+        .collect(Collectors.toMap(SourceProblem::getId, Function.identity()));
+  }
+
+  // 과제의 원본 지문. 수학이 아닌 과목은 같은 지문에 다른 문제를 내므로 지문을 함께 보여 줘야 풀 수 있습니다. 없으면 null
+  private static String passageOf(Map<Long, SourceProblem> sources, Assignment assignment) {
+    SourceProblem source = sources.get(assignment.getSourceProblemId());
+    return source == null ? null : source.getPassageText();
   }
 
   private static List<String> choicesLatex(Variant variant) {

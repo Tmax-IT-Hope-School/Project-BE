@@ -706,13 +706,14 @@ erDiagram
         int level "레벨 -1, 0, 1, 2"
         varchar format "MC5, SHORT"
         varchar status "VERIFIED, REJECTED"
-        varchar verification_code "AI 가 쓴 Symja 검증 코드 (학생에게 안 보냄)"
+        varchar verification_code "AI 가 쓴 Symja 검증 코드 (학생에게 안 보냄, 수학 밖은 빈 글자)"
+        varchar verification_method "SYMJA, AI_SOLVE (정답을 무엇으로 확인했는지)"
         varchar rejection_reason "떨어진 이유"
     }
     variant_choices {
         bigint variant_id FK "어느 변형의 선지인지"
         int position "섞은 뒤 순서"
-        varchar value_expr "선지 값 (Symja 식)"
+        varchar value_expr "선지 값 (Symja 식, 수학 밖은 선지 글)"
         varchar latex "화면용 LaTeX (샌드박스가 만듦)"
         varchar rationale "어떤 실수인지 (정답은 빈 글자)"
     }
@@ -1027,6 +1028,7 @@ erDiagram
 > - "같은 원본에 ACTIVE 학습 항목은 하나" · "한 항목에 하루 한 과제" 는 원래 설계의 **부분 유니크 인덱스** 대신 **있을 때만 채우는 칸 + 유니크**(`active_source_problem_id`, `daily_review_item_id`)로 지킵니다. 로컬 DB(H2)가 부분 인덱스를 지원하지 않기 때문입니다. 비어 있는(null) 칸끼리는 겹친다고 보지 않습니다.
 > - `value` 는 H2 예약어라서 `value_expr` 로 했습니다. (주간 세트는 같은 저장소의 weekly_goals 처럼 `week_start` 날짜를 씁니다)
 > - `source_problems` 의 `origin` · `subject` · `standard_code` · `passage_text` 는 2026-10-24 확인 문제 연결(#394, migration 23)에서 더했습니다. **칸 이름은 AI 가 지었습니다 — 담당 학생이 확인해 주세요.** 이미 있던 줄은 `origin=MANUAL`, `subject` 는 비어 있음(= 고1 공통수학1)입니다. 성취기준 코드가 있으면 수학이 아닌 과목이고, 그때는 단원 · 유형 코드가 비어 있습니다.
+> - `variants` 의 `verification_method` 는 2026-10-25 수학 밖 과목 변형(#394, migration 24)에서 더했습니다. **칸 이름은 AI 가 지었습니다 — 담당 학생이 확인해 주세요.** 이미 있던 줄은 `SYMJA` 입니다. 수학이 아닌 과목(`AI_SOLVE`)은 계산할 식이 없어서 `verification_code` 가 빈 글자이고, 선지의 `value_expr` · `latex` 에 선지 글이 그대로 들어갑니다.
 
 ## 그림 읽는 법
 

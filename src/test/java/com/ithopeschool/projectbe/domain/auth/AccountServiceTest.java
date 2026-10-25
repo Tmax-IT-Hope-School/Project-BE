@@ -53,6 +53,7 @@ import com.ithopeschool.projectbe.domain.variant.SourceProblem;
 import com.ithopeschool.projectbe.domain.variant.Variant;
 import com.ithopeschool.projectbe.domain.variant.VariantChoice;
 import com.ithopeschool.projectbe.domain.variant.VariantFormat;
+import com.ithopeschool.projectbe.domain.variant.VariantVerificationMethod;
 import com.ithopeschool.projectbe.global.auth.CurrentUserProvider;
 import com.ithopeschool.projectbe.global.exception.ApiException;
 import com.ithopeschool.projectbe.global.exception.ErrorCode;
@@ -760,6 +761,7 @@ class AccountServiceTest {
               "해설",
               "k = 1; k",
               "{}",
+              VariantVerificationMethod.SYMJA,
               "test-model",
               "variant_v2",
               1,

@@ -67,6 +67,24 @@ public class GptVariantAi implements VariantAi {
     return aiClient.ask(userId, GptUsageKind.VARIANT, question, QuizClassificationDraft.class);
   }
 
+  @Override
+  public Optional<TextVariantDraft> generateText(Long userId, String instructions, String input) {
+    AiQuestion question = new AiQuestion("variant_text", instructions, input, textVariantSchema());
+    return aiClient.askLong(userId, GptUsageKind.VARIANT, question, TextVariantDraft.class);
+  }
+
+  // 수학이 아닌 과목의 변형 문항 답 모양 (TextVariantDraft 와 같은 칸)
+  static Map<String, Object> textVariantSchema() {
+    Map<String, Object> properties = new LinkedHashMap<>();
+    properties.put("problemText", AiSchema.string());
+    properties.put("choices", AiSchema.stringList());
+    properties.put("answerIndex", AiSchema.nullableInteger());
+    properties.put("distractorRationales", AiSchema.stringList());
+    properties.put("solution", AiSchema.string());
+    properties.put("levelJustification", AiSchema.string());
+    return AiSchema.object(properties);
+  }
+
   // 변형 문항의 답 모양 (VariantDraft 와 같은 칸)
   static Map<String, Object> variantSchema() {
     Map<String, Object> properties = new LinkedHashMap<>();

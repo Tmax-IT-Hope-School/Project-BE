@@ -20,6 +20,7 @@ import org.springframework.stereotype.Service;
 // 주간 심화 세트를 만드는 곳입니다. (docs/VARIANT-SPEC.md 3-4)
 //
 //   (A) 맞은 문제의 대표 유형 심화: 지난주(월 ~ 일)에 맞힌 원본을 유형별로 세어 많은 순으로 weekly-correct-types 개
+//       (수학이 아닌 과목은 성취기준 코드를 유형으로 봅니다)
 //       (동률이면 최근에 푼 유형 먼저). 유형마다 가장 최근 원본으로 L2 변형.
 //   (B) 극복한 오답의 심화: GRADUATED 항목을 졸업이 오래된 순으로 weekly-wrong-max 개. L2 변형.
 //       ACTIVE 항목은 넣지 않습니다. (L1 도 못 넘은 항목에 심화는 너무 어렵습니다)
@@ -116,10 +117,12 @@ public class WeeklySetService {
         sourceProblemRepository.findCorrectBetween(
             userId, SupportStatus.SUPPORTED, startOf(weekStart), startOf(weekStart.plusWeeks(1)));
 
-    // 유형 코드 → 그 유형의 원본들 (푼 순서)
+    // 유형 → 그 유형의 원본들 (푼 순서)
+    // 유형은 수학이면 유형 코드, 수학이 아닌 과목이면 성취기준 코드입니다. (docs/VARIANT-SPEC.md 3-4)
     Map<String, List<SourceProblem>> byType = new LinkedHashMap<>();
     for (SourceProblem source : correct) {
-      byType.computeIfAbsent(source.getTypeCode(), code -> new ArrayList<>()).add(source);
+      String type = source.isMath() ? source.getTypeCode() : source.getStandardCode();
+      byType.computeIfAbsent(type, code -> new ArrayList<>()).add(source);
     }
 
     // 개수가 많은 순 → 같으면 가장 최근에 푼 순

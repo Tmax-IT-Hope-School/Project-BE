@@ -25,4 +25,7 @@ public interface VariantAi {
 
   // 확인 문제를 수학 분류체계 · 성취기준 중 하나로 분류합니다. (docs/VARIANT-SPEC.md 5-1)
   Optional<QuizClassificationDraft> classifyQuiz(Long userId, String instructions, String input);
+
+  // 수학이 아닌 과목의 변형을 만듭니다. (docs/VARIANT-SPEC.md 6-4)
+  Optional<TextVariantDraft> generateText(Long userId, String instructions, String input);
 }
