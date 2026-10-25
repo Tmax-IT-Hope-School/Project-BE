@@ -2,6 +2,7 @@ package com.ithopeschool.projectbe.domain.variant.generate;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.ithopeschool.projectbe.domain.curriculum.CurriculumLibrary;
 import com.ithopeschool.projectbe.domain.variant.ClassificationSource;
 import com.ithopeschool.projectbe.domain.variant.SourceProblem;
 import com.ithopeschool.projectbe.domain.variant.SourceProblemRepository;
@@ -71,6 +72,7 @@ class VariantPipelineTest {
         new VariantSandbox(settings),
         variantRepository,
         taxonomy,
+        new CurriculumLibrary(),
         settings,
         Clock.fixed(NOW, ZoneOffset.UTC),
         new Random(1));

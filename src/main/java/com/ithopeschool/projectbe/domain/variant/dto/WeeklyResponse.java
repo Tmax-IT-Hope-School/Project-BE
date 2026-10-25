@@ -10,12 +10,14 @@ public record WeeklyResponse(LocalDate weekStart, LocalDate dueDate, List<Item> 
 
   //   number    : 1 부터의 문항 번호
   //   source    : a (맞은 문제의 대표 유형 심화) · b (극복한 오답의 심화)
+  //   passage   : 문제가 기대는 지문. 없으면 null
   //   answerKey : includeAnswers=true 이고, 이미 답했거나 마감된 문항만. 그 밖에는 null
   public record Item(
       int number,
       String assignmentId,
       String source,
       String format,
+      String passage,
       String problemText,
       List<String> choicesLatex,
       String status,

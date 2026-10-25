@@ -15,11 +15,14 @@ public class FakeVariantAi implements VariantAi {
   private final Deque<Optional<ClassificationDraft>> classifications = new ArrayDeque<>();
   private final Deque<Optional<SolveCheckDraft>> solveChecks = new ArrayDeque<>();
   private final Deque<Optional<QuizClassificationDraft>> quizClassifications = new ArrayDeque<>();
+  private final Deque<Optional<TextVariantDraft>> textDrafts = new ArrayDeque<>();
   // 독립 풀이 · 확인 문제 분류 프롬프트로 받은 user 칸들 (부른 순서)
   public final List<String> solveInputs = new ArrayList<>();
   public final List<String> quizClassifyInputs = new ArrayList<>();
   // 변형 생성 프롬프트로 받은 user 칸들 (부른 순서)
   public final List<String> variantInputs = new ArrayList<>();
+  // 수학이 아닌 과목의 변형 생성 프롬프트로 받은 user 칸들 (부른 순서)
+  public final List<String> textVariantInputs = new ArrayList<>();
   public final List<String> classifyInputs = new ArrayList<>();
 
   public FakeVariantAi disable() {
@@ -34,6 +37,8 @@ public class FakeVariantAi implements VariantAi {
     classifications.clear();
     solveChecks.clear();
     quizClassifications.clear();
+    textDrafts.clear();
+    textVariantInputs.clear();
     variantInputs.clear();
     classifyInputs.clear();
     solveInputs.clear();
@@ -64,6 +69,12 @@ public class FakeVariantAi implements VariantAi {
 
   public FakeVariantAi willClassifyQuiz(QuizClassificationDraft draft) {
     quizClassifications.add(Optional.ofNullable(draft));
+    return this;
+  }
+
+  // 수학이 아닌 과목의 변형 답. null 이면 AI 가 답하지 않은 경우입니다
+  public FakeVariantAi willGenerateText(TextVariantDraft draft) {
+    textDrafts.add(Optional.ofNullable(draft));
     return this;
   }
 
@@ -111,5 +122,11 @@ public class FakeVariantAi implements VariantAi {
       Long userId, String instructions, String input) {
     quizClassifyInputs.add(input);
     return quizClassifications.isEmpty() ? Optional.empty() : quizClassifications.poll();
+  }
+
+  @Override
+  public Optional<TextVariantDraft> generateText(Long userId, String instructions, String input) {
+    textVariantInputs.add(input);
+    return textDrafts.isEmpty() ? Optional.empty() : textDrafts.poll();
   }
 }

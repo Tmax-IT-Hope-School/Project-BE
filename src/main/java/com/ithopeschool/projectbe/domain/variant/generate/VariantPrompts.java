@@ -5,7 +5,7 @@ import java.util.List;
 import java.util.Map;
 import org.springframework.stereotype.Component;
 
-// 변형 문제 기능의 프롬프트 세 개(변형 생성 · 분류 · 독립 풀이)를 서버가 켜질 때 읽어 두고, 값을 채워 줍니다.
+// 변형 문제 기능의 프롬프트들(변형 생성 · 분류 · 독립 풀이, 확인 문제용, 수학 밖 과목용)을 서버가 켜질 때 읽어 두고, 값을 채워 줍니다.
 // 프롬프트 글은 코드에 적지 않고 src/main/resources/prompts/variant/*.md 에만 있습니다.
 //
 // 프롬프트를 바꾸려면 기존 파일을 고치지 말고 새 버전 파일(예: variant_v3.md)을 만든 뒤 아래 버전 이름을 바꿉니다.
@@ -19,6 +19,9 @@ public class VariantPrompts {
   // 확인 문제를 원본으로 쓰기 전의 정답 확인 · 분류 (docs/VARIANT-SPEC.md 5-1)
   public static final String QUIZ_CHECK_VERSION = "quiz_check_v1";
   public static final String QUIZ_CLASSIFY_VERSION = "quiz_classify_v1";
+  // 수학이 아닌 과목의 변형 생성 · G7 독립 풀이 (docs/VARIANT-SPEC.md 2-1 · 6-4)
+  public static final String TEXT_VARIANT_VERSION = "variant_text_v1";
+  public static final String TEXT_SOLVE_CHECK_VERSION = "solve_check_text_v1";
 
   // 비어 있는 값을 AI 에게 보여 줄 때 쓰는 글
   static final String NONE = "(없음)";
@@ -31,6 +34,8 @@ public class VariantPrompts {
   private final PromptTemplate solveCheck;
   private final PromptTemplate quizCheck;
   private final PromptTemplate quizClassify;
+  private final PromptTemplate textVariant;
+  private final PromptTemplate textSolveCheck;
 
   public VariantPrompts() {
     this.variant = PromptTemplate.load(VARIANT_VERSION);
@@ -38,9 +43,15 @@ public class VariantPrompts {
     this.solveCheck = PromptTemplate.load(SOLVE_CHECK_VERSION);
     this.quizCheck = PromptTemplate.load(QUIZ_CHECK_VERSION);
     this.quizClassify = PromptTemplate.load(QUIZ_CLASSIFY_VERSION);
+    this.textVariant = PromptTemplate.load(TEXT_VARIANT_VERSION);
+    this.textSolveCheck = PromptTemplate.load(TEXT_SOLVE_CHECK_VERSION);
     for (int level = -1; level <= 2; level++) {
       if (!variant.hasSection(levelSection(level))) {
         throw new IllegalStateException(VARIANT_VERSION + " 에 " + levelSection(level) + " 칸이 없어요");
+      }
+      if (!textVariant.hasSection(levelSection(level))) {
+        throw new IllegalStateException(
+            TEXT_VARIANT_VERSION + " 에 " + levelSection(level) + " 칸이 없어요");
       }
     }
   }
@@ -111,6 +122,46 @@ public class VariantPrompts {
     values.put("previous_failure", orNone(previousFailure));
     return new Prompt(quizClassify.render("system", values), quizClassify.render("user", values));
   }
+
+  // 수학이 아닌 과목의 변형 생성 프롬프트. 지문이 있으면 같은 지문에 다른 문제를 내게 합니다.
+  public Prompt textVariant(TextVariantRequest request) {
+    Map<String, String> values = new HashMap<>();
+    values.put("subject", orNone(request.subject()));
+    values.put("standard_code", request.standardCode());
+    values.put("standard_text", orNone(request.standardText()));
+    values.put("passage", orNone(request.passage()));
+    values.put("source_problem_text", request.sourceProblemText());
+    values.put("source_choices", numbered(request.sourceChoices()));
+    values.put("source_answer", orNone(request.sourceAnswer()));
+    values.put("level", levelLabel(request.level()));
+    values.put("level_rule", textVariant.render(levelSection(request.level()), Map.of()));
+    values.put("avoid_variants", numbered(request.avoidVariants()));
+    values.put("previous_failure", orNone(request.previousFailure()));
+    return new Prompt(textVariant.render("system", values), textVariant.render("user", values));
+  }
+
+  // 수학이 아닌 과목의 독립 풀이 프롬프트 (G7). 정답 · 해설은 보내지 않습니다.
+  public Prompt textSolveCheck(String passage, String problemText, List<String> choices) {
+    Map<String, String> values = new HashMap<>();
+    values.put("passage", orNone(passage));
+    values.put("problem_text", problemText);
+    values.put("choices_text", numberedFromZero(choices));
+    return new Prompt(
+        textSolveCheck.render("system", values), textSolveCheck.render("user", values));
+  }
+
+  // 수학이 아닌 과목의 변형 생성에 필요한 값 묶음
+  public record TextVariantRequest(
+      String subject,
+      String standardCode,
+      String standardText,
+      String passage,
+      String sourceProblemText,
+      List<String> sourceChoices,
+      String sourceAnswer,
+      int level,
+      List<String> avoidVariants,
+      String previousFailure) {}
 
   // 변형 생성에 필요한 값 묶음
   public record VariantRequest(

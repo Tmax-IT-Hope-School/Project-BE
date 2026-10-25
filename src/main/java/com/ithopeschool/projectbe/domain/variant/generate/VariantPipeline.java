@@ -1,5 +1,8 @@
 package com.ithopeschool.projectbe.domain.variant.generate;
 
+import com.ithopeschool.projectbe.domain.curriculum.AchievementStandard;
+import com.ithopeschool.projectbe.domain.curriculum.CurriculumLibrary;
+import com.ithopeschool.projectbe.domain.curriculum.CurriculumVersion;
 import com.ithopeschool.projectbe.domain.variant.SourceProblem;
 import com.ithopeschool.projectbe.domain.variant.Variant;
 import com.ithopeschool.projectbe.domain.variant.VariantChoice;
@@ -9,6 +12,7 @@ import com.ithopeschool.projectbe.domain.variant.VariantRepository;
 import com.ithopeschool.projectbe.domain.variant.VariantSettings;
 import com.ithopeschool.projectbe.domain.variant.VariantStatus;
 import com.ithopeschool.projectbe.domain.variant.VariantTaxonomy;
+import com.ithopeschool.projectbe.domain.variant.VariantVerificationMethod;
 import com.ithopeschool.projectbe.domain.variant.sandbox.SandboxRequest;
 import com.ithopeschool.projectbe.domain.variant.sandbox.SandboxResult;
 import com.ithopeschool.projectbe.domain.variant.sandbox.SymjaGuard;
@@ -39,6 +43,10 @@ import tools.jackson.databind.json.JsonMapper;
 //
 // ⚠️ AI 가 쓴 코드와 선지는 여기서 계산하지 않습니다. 모양 검사(G3)만 하고, 계산은 샌드박스(G4 · G5)가 합니다.
 // ⚠️ AI 를 부르는 동안 DB 작업(트랜잭션)을 열어 두지 않습니다. 시도마다 저장만 짧게 합니다.
+//
+// 수학이 아닌 과목(성취기준으로 분류된 원본)은 계산할 식이 없어서 순서가 다릅니다. (docs/VARIANT-SPEC.md 6-4)
+//   AI 생성(글 선지 MC5) → G1 모양 → G2 형식 → G6 중복 → G7 독립 풀이(항상) → 통과: 선지를 섞고 VERIFIED
+//   G3 · G4 · G5 는 건너뛰고, 검증 방법은 AI_SOLVE 로 남깁니다.
 @Service
 public class VariantPipeline {
 
@@ -58,6 +66,8 @@ public class VariantPipeline {
   private final VariantSandbox sandbox;
   private final VariantRepository variantRepository;
   private final VariantTaxonomy taxonomy;
+  // 수학이 아닌 과목의 성취기준 문장을 프롬프트에 넣으려고 씁니다
+  private final CurriculumLibrary curriculum;
   private final VariantSettings settings;
   private final Clock clock;
   // 선지를 섞을 때 쓰는 무작위 수. 테스트에서는 결과가 늘 같도록 정해진 것을 넣습니다
@@ -70,9 +80,19 @@ public class VariantPipeline {
       VariantSandbox sandbox,
       VariantRepository variantRepository,
       VariantTaxonomy taxonomy,
+      CurriculumLibrary curriculum,
       VariantSettings settings,
       Clock clock) {
-    this(ai, prompts, sandbox, variantRepository, taxonomy, settings, clock, new Random());
+    this(
+        ai,
+        prompts,
+        sandbox,
+        variantRepository,
+        taxonomy,
+        curriculum,
+        settings,
+        clock,
+        new Random());
   }
 
   public VariantPipeline(
@@ -81,6 +101,7 @@ public class VariantPipeline {
       VariantSandbox sandbox,
       VariantRepository variantRepository,
       VariantTaxonomy taxonomy,
+      CurriculumLibrary curriculum,
       VariantSettings settings,
       Clock clock,
       RandomGenerator random) {
@@ -89,6 +110,7 @@ public class VariantPipeline {
     this.sandbox = sandbox;
     this.variantRepository = variantRepository;
     this.taxonomy = taxonomy;
+    this.curriculum = curriculum;
     this.settings = settings;
     this.clock = clock;
     this.random = random;
@@ -112,6 +134,9 @@ public class VariantPipeline {
   public Optional<Variant> generate(SourceProblem source, int level) {
     if (!ai.isEnabled()) {
       return Optional.empty();
+    }
+    if (!source.isMath()) {
+      return generateText(source, level);
     }
     Optional<VariantTaxonomy.Type> type = taxonomy.findType(source.getTypeCode());
     Optional<VariantTaxonomy.Unit> unit = taxonomy.findUnit(source.getUnitCode());
@@ -165,6 +190,7 @@ public class VariantPipeline {
               d == null ? null : d.solution(),
               d == null ? null : d.verificationCode(),
               gates.toJson(),
+              VariantVerificationMethod.SYMJA,
               gates.failure(),
               ai.modelName(),
               VariantPrompts.VARIANT_VERSION,
@@ -417,17 +443,7 @@ public class VariantPipeline {
     List<VariantChoice> choices = new ArrayList<>();
     Integer answerIndex = null;
     if (checked.format() == VariantFormat.MC5) {
-      List<Integer> order = new ArrayList<>();
-      for (int i = 0; i < CHOICE_COUNT; i++) {
-        order.add(i);
-      }
-      // 피셔-예이츠 섞기: 뒤에서부터 앞쪽의 아무 칸과 바꿉니다
-      for (int i = order.size() - 1; i > 0; i--) {
-        int j = random.nextInt(i + 1);
-        Integer swap = order.get(i);
-        order.set(i, order.get(j));
-        order.set(j, swap);
-      }
+      List<Integer> order = shuffledOrder();
       for (int position = 0; position < CHOICE_COUNT; position++) {
         int original = order.get(position);
         choices.add(
@@ -453,10 +469,260 @@ public class VariantPipeline {
         draft.solution(),
         draft.verificationCode(),
         gates.toJson(),
+        VariantVerificationMethod.SYMJA,
         ai.modelName(),
         VariantPrompts.VARIANT_VERSION,
         attempt,
         now);
+  }
+
+  // 선지 5개를 섞은 순서. order.get(새 위치) = 원래 위치
+  private List<Integer> shuffledOrder() {
+    List<Integer> order = new ArrayList<>();
+    for (int i = 0; i < CHOICE_COUNT; i++) {
+      order.add(i);
+    }
+    // 피셔-예이츠 섞기: 뒤에서부터 앞쪽의 아무 칸과 바꿉니다
+    for (int i = order.size() - 1; i > 0; i--) {
+      int j = random.nextInt(i + 1);
+      Integer swap = order.get(i);
+      order.set(i, order.get(j));
+      order.set(j, swap);
+    }
+    return order;
+  }
+
+  // ---- 수학이 아닌 과목 (docs/VARIANT-SPEC.md 2-1 · 6-4) ----
+
+  // 수학이 아닌 과목의 변형 하나를 만듭니다. 지문이 있으면 같은 지문에 다른 문제를 내게 합니다.
+  // 검사를 모두 통과한 변형(VERIFIED)을 돌려주고, 끝내 못 만들면 빈 값입니다.
+  private Optional<Variant> generateText(SourceProblem source, int level) {
+    List<Variant> verified =
+        variantRepository.findBySourceProblemIdAndStatusOrderByIdDesc(
+            source.getId(), VariantStatus.VERIFIED);
+    List<String> avoid = verified.stream().limit(AVOID_LIMIT).map(Variant::getProblemText).toList();
+    String standardText = standardText(source.getStandardCode());
+
+    String previousFailure = null;
+    for (int attempt = 1; attempt <= settings.maxGenerationAttempts(); attempt++) {
+      VariantPrompts.Prompt prompt =
+          prompts.textVariant(
+              new VariantPrompts.TextVariantRequest(
+                  source.getSubject(),
+                  source.getStandardCode(),
+                  standardText,
+                  source.getPassageText(),
+                  source.getProblemText(),
+                  source.getChoices(),
+                  source.getCorrectAnswer(),
+                  level,
+                  avoid,
+                  previousFailure));
+      Optional<TextVariantDraft> draft =
+          ai.generateText(source.getUserId(), prompt.instructions(), prompt.input());
+
+      GateLog gates = new GateLog();
+      boolean passed = checkText(draft, source, level, verified, gates);
+      Instant now = clock.instant();
+      if (passed) {
+        Variant saved =
+            variantRepository.save(toVerifiedText(source, level, draft.get(), gates, attempt, now));
+        return Optional.of(saved);
+      }
+
+      TextVariantDraft d = draft.orElse(null);
+      variantRepository.save(
+          Variant.rejected(
+              source.getUserId(),
+              source.getId(),
+              level,
+              d == null ? null : VariantFormat.MC5,
+              d == null ? null : d.problemText(),
+              d == null ? null : d.solution(),
+              null,
+              gates.toJson(),
+              VariantVerificationMethod.AI_SOLVE,
+              gates.failure(),
+              ai.modelName(),
+              VariantPrompts.TEXT_VARIANT_VERSION,
+              attempt,
+              now));
+      previousFailure = gates.failure();
+    }
+    log.warn(
+        "[변형] 원본 {} 레벨 {} 의 변형(수학 밖 과목)을 {}번 시도했지만 검사를 통과하지 못했어요",
+        source.getId(),
+        level,
+        settings.maxGenerationAttempts());
+    return Optional.empty();
+  }
+
+  // 수학이 아닌 과목의 검사 (G1 · G2 · G6 · G7). 통과하면 true 입니다.
+  private boolean checkText(
+      Optional<TextVariantDraft> maybeDraft,
+      SourceProblem source,
+      int level,
+      List<Variant> verified,
+      GateLog gates) {
+    // G1 모양
+    if (maybeDraft.isEmpty()) {
+      gates.fail("G1", "AI 의 답을 받지 못했거나 약속한 JSON 모양이 아니에요");
+      return false;
+    }
+    TextVariantDraft draft = maybeDraft.get();
+    Optional<String> shape = textShapeProblem(draft);
+    if (shape.isPresent()) {
+      gates.fail("G1", shape.get());
+      return false;
+    }
+    gates.pass("G1");
+
+    // G2 형식: 수학 MC5 와 같은 규칙 + 선지끼리 같은 글이면 안 됨
+    VariantDraft asMc5 =
+        new VariantDraft(
+            draft.problemText(),
+            VariantFormat.MC5.name(),
+            draft.choices(),
+            draft.answerIndex(),
+            null,
+            draft.distractorRationales(),
+            draft.solution(),
+            null,
+            draft.levelJustification());
+    Optional<String> formatProblem = formatProblem(asMc5, VariantFormat.MC5, level);
+    if (formatProblem.isEmpty()) {
+      formatProblem = duplicateChoiceProblem(draft.choices());
+    }
+    if (formatProblem.isPresent()) {
+      gates.fail("G2", formatProblem.get());
+      return false;
+    }
+    gates.pass("G2");
+
+    // G3 · G4 · G5 는 계산할 식이 없어서 하지 않습니다.
+    gates.skip("G3");
+    gates.skip("G4");
+    gates.skip("G5");
+
+    // G6 중복
+    String fingerprint = VariantFingerprint.of(draft.problemText());
+    if (fingerprint.equals(source.getFingerprint())) {
+      gates.fail("G6", "원본과 같은 문제예요. 묻는 대상이나 관점을 바꿔 주세요");
+      return false;
+    }
+    if (verified.stream().anyMatch(v -> v.getFingerprint().equals(fingerprint))) {
+      gates.fail("G6", "이미 만든 변형과 같은 문제예요");
+      return false;
+    }
+    gates.pass("G6");
+
+    // G7 독립 풀이 (수학이 아닌 과목은 설정과 상관없이 항상)
+    VariantPrompts.Prompt prompt =
+        prompts.textSolveCheck(source.getPassageText(), draft.problemText(), draft.choices());
+    Optional<SolveCheckDraft> solved =
+        ai.solveCheck(source.getUserId(), prompt.instructions(), prompt.input());
+    if (solved.isEmpty()) {
+      gates.fail("G7", "독립 풀이 답을 받지 못했어요");
+      return false;
+    }
+    if (!draft.answerIndex().equals(solved.get().answerIndex())) {
+      gates.fail("G7", "따로 푼 답이 정답과 달라요. 정답이 하나로 정해지지 않거나 지문에 근거가 부족할 수 있어요");
+      return false;
+    }
+    gates.pass("G7");
+    return true;
+  }
+
+  // 수학이 아닌 과목의 G1: 꼭 있어야 하는 칸과 글자 수 한도 (검증 코드는 없음)
+  private static Optional<String> textShapeProblem(TextVariantDraft draft) {
+    if (isBlank(draft.problemText())) {
+      return Optional.of("문제 글(problemText)이 비어 있어요");
+    }
+    if (draft.problemText().length() > Variant.MAX_PROBLEM_TEXT_LENGTH) {
+      return Optional.of("문제 글이 " + Variant.MAX_PROBLEM_TEXT_LENGTH + "자를 넘어요");
+    }
+    if (isBlank(draft.solution())) {
+      return Optional.of("해설(solution)이 비어 있어요");
+    }
+    if (draft.solution().length() > Variant.MAX_SOLUTION_LENGTH) {
+      return Optional.of("해설이 " + Variant.MAX_SOLUTION_LENGTH + "자를 넘어요");
+    }
+    if (draft.choices() != null) {
+      for (String choice : draft.choices()) {
+        if (choice != null && choice.length() > VariantChoice.MAX_VALUE_LENGTH) {
+          return Optional.of("선지가 " + VariantChoice.MAX_VALUE_LENGTH + "자를 넘어요");
+        }
+      }
+    }
+    if (draft.distractorRationales() != null) {
+      for (String rationale : draft.distractorRationales()) {
+        if (rationale != null && rationale.length() > VariantChoice.MAX_RATIONALE_LENGTH) {
+          return Optional.of("선지 해설이 " + VariantChoice.MAX_RATIONALE_LENGTH + "자를 넘어요");
+        }
+      }
+    }
+    return Optional.empty();
+  }
+
+  // 수학이 아닌 과목의 G2 추가 규칙: 띄어쓰기만 다른 선지도 같은 선지로 봅니다.
+  private static Optional<String> duplicateChoiceProblem(List<String> choices) {
+    List<String> seen = new ArrayList<>();
+    for (String choice : choices) {
+      String withoutSpaces = choice.replaceAll("\\s+", "");
+      if (seen.contains(withoutSpaces)) {
+        return Optional.of("같은 글의 선지가 있어요: " + choice);
+      }
+      seen.add(withoutSpaces);
+    }
+    return Optional.empty();
+  }
+
+  // 수학이 아닌 과목의 통과한 변형. 선지는 글이라 값과 화면용 글자가 같습니다.
+  private Variant toVerifiedText(
+      SourceProblem source,
+      int level,
+      TextVariantDraft draft,
+      GateLog gates,
+      int attempt,
+      Instant now) {
+    List<Integer> order = shuffledOrder();
+    List<VariantChoice> choices = new ArrayList<>();
+    Integer answerIndex = null;
+    for (int position = 0; position < CHOICE_COUNT; position++) {
+      int original = order.get(position);
+      String text = draft.choices().get(original);
+      choices.add(new VariantChoice(text, text, draft.distractorRationales().get(original)));
+      if (original == draft.answerIndex()) {
+        answerIndex = position;
+      }
+    }
+    return Variant.verified(
+        source.getUserId(),
+        source.getId(),
+        level,
+        VariantFormat.MC5,
+        draft.problemText(),
+        choices,
+        answerIndex,
+        null,
+        draft.choices().get(draft.answerIndex()),
+        draft.solution(),
+        null,
+        gates.toJson(),
+        VariantVerificationMethod.AI_SOLVE,
+        ai.modelName(),
+        VariantPrompts.TEXT_VARIANT_VERSION,
+        attempt,
+        now);
+  }
+
+  // 성취기준 코드의 문장 (2022 개정). 파일에 없으면 빈 값
+  private String standardText(String code) {
+    return curriculum.standards(CurriculumVersion.V2022).stream()
+        .filter(standard -> standard.code().equals(code))
+        .map(AchievementStandard::text)
+        .findFirst()
+        .orElse(null);
   }
 
   static VariantFormat parseFormat(String format) {

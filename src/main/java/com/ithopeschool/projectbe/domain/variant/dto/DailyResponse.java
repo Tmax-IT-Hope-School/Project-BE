@@ -10,12 +10,14 @@ public record DailyResponse(LocalDate date, List<Item> items, int preparingCount
 
   //   level        : -1 · 0 · 1
   //   format       : mc5 · short
-  //   choicesLatex : 선지 화면용 LaTeX (short 면 빈 목록)
+  //   passage      : 문제가 기대는 지문 (국어 · 영어 독해 등). 없으면 null
+  //   choicesLatex : 선지 화면용 LaTeX (short 면 빈 목록). 수학이 아닌 과목은 글 그대로 ($…$ 만 수식)
   //   status       : pending · answered · expired
   public record Item(
       String assignmentId,
       int level,
       String format,
+      String passage,
       String problemText,
       List<String> choicesLatex,
       String status) {}
