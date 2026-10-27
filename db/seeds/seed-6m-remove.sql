@@ -24,7 +24,10 @@ delete from goals where id in (select row_id from seed_6m_rows where tbl = 'goal
 delete from reviews where id in (select row_id from seed_6m_rows where tbl = 'reviews');
 delete from exam_scores where id in (select row_id from seed_6m_rows where tbl = 'exam_scores');
 delete from exams where id in (select row_id from seed_6m_rows where tbl = 'exams');
-delete from subjects where id in (select row_id from seed_6m_rows where tbl = 'subjects') and not exists (select 1 from study_sessions s where s.subject_id = subjects.id) and not exists (select 1 from study_plans sp where sp.subject_id = subjects.id) and not exists (select 1 from exam_scores e where e.subject_id = subjects.id);
+-- 문제 풀이 결과 · 이번 주에 고른 것 (seed-6m-topup.sql 이 넣은 것)
+delete from quiz_results where id in (select row_id from seed_6m_rows where tbl = 'quiz_results');
+delete from weekly_picks where id in (select row_id from seed_6m_rows where tbl = 'weekly_picks');
+delete from subjects where id in (select row_id from seed_6m_rows where tbl = 'subjects') and not exists (select 1 from study_sessions s where s.subject_id = subjects.id) and not exists (select 1 from study_plans sp where sp.subject_id = subjects.id) and not exists (select 1 from exam_scores e where e.subject_id = subjects.id) and not exists (select 1 from quiz_results q where q.subject_id = subjects.id) and not exists (select 1 from cards c where c.subject_id = subjects.id);
 delete from weekly_goals where id in (select row_id from seed_6m_rows where tbl = 'weekly_goals');
 delete from messages where id in (select row_id from seed_6m_rows where tbl = 'messages');
 delete from fixed_blocks where id in (select row_id from seed_6m_rows where tbl = 'fixed_blocks');
@@ -34,4 +37,9 @@ drop table if exists seed_6m_rows;
 drop table if exists seed_6m_daysum;
 drop table if exists seed_6m_plan;
 drop table if exists seed_6m_days;
+-- seed-6m-topup.sql 의 계산용 표
+drop table if exists seed_6m_weeks;
+drop table if exists seed_6m_new_users;
+drop table if exists seed_6m_today;
+drop table if exists seed_6m_before;
 commit;
