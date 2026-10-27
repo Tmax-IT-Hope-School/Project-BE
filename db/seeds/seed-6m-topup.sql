@@ -3,7 +3,7 @@
 --   1. seed-6m.sql 을 넣은 다음 날부터 어제까지의 기록 (카드 결과 · 세션 · 체크인 · 신호 · 관리 단계 · 통화 · 메시지)
 --   2. 그 뒤에 가입한 사람(가상 카드가 없는 사람)에게는 6개월치 전체 (카드 · 목표 · 고정 일정 · 시험 · 회고까지)
 --   3. 가상 카드와 그 카드로 잰 가상 세션에 과목을 붙입니다. (문제 풀이 리포트의 "이 과목 공부 시간")
---   4. 문제 풀이 결과(quiz_results): 최근 8주, 가상 공부 세션 넷 중 셋에 3문제씩
+--   4. 문제 풀이 결과(quiz_results): 최근 8주, 카드를 끝까지 한 가상 공부 세션 넷 중 셋에 3문제씩
 --   5. 이번 주에 고른 것(weekly_picks): 최근 8주 + 이번 주
 --   6. 주간 목표 · 주간 회고: 새로 끝난 주
 -- 여러 번 실행해도 두 벌이 되지 않습니다. 더한 줄도 seed_6m_rows 에 적어서 seed-6m-remove.sql 로 같이 지워집니다.
@@ -601,7 +601,8 @@ where s.card_id = c.id
   and s.subject_id is null
   and c.subject_id is not null;
 
--- 19) 문제 풀이 결과: 최근 8주(56일), 가상 공부 세션 넷 중 셋을 끝낸 뒤 3문제
+-- 19) 문제 풀이 결과: 최근 8주(56일), 카드를 끝까지 한 가상 공부 세션 넷 중 셋을 끝낸 뒤 3문제
+--     일찍 끝낸 세션(ended_early)에는 붙이지 않습니다. 확인 문제는 공부를 끝낸 카드로 내기 때문입니다.
 --     단원마다 처음 실력과 늘어나는 정도가 다릅니다. 삼각함수는 끝까지 60% 아래라 "취약 단원" 으로 보입니다.
 with units(unit, skill_start, skill_gain, sec_lo, sec_hi) as (
   values ('영단어', 0.60, 0.20, 8, 25),
@@ -620,6 +621,7 @@ src as (
   join cards c on c.id = s.card_id
   where s.id in (select row_id from seed_6m_rows where tbl = 'study_sessions')
     and s.kind = 'STUDY' and s.subject_id is not null
+    and s.ended_early = false
 ),
 picked as (
   select src.*,
