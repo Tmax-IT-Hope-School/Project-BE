@@ -660,6 +660,89 @@ erDiagram
         bigint risk_forecast_id FK "어느 예측의 이유인지"
         varchar reason "위험하다고 본 이유 (WEAK_WEEKDAY, LATE_SLEEP 중 하나)"
     }
+    users ||--o{ source_problems : "user_id"
+    users ||--o{ review_items : "user_id"
+    users ||--o{ variants : "user_id"
+    users ||--o{ weekly_sets : "user_id"
+    users ||--o{ assignments : "user_id"
+    users ||--o{ attempts : "user_id"
+    source_problems ||--o{ source_problem_choices : "source_problem_id"
+    source_problems ||--o{ review_items : "source_problem_id (번호만)"
+    source_problems ||--o{ variants : "source_problem_id (번호만)"
+    variants ||--o{ variant_choices : "variant_id"
+    variants ||--o| assignments : "variant_id (번호만)"
+    review_items ||--o{ assignments : "review_item_id (번호만)"
+    weekly_sets ||--o{ assignments : "weekly_set_id (번호만)"
+    assignments ||--o| attempts : "assignment_id (번호만)"
+    source_problems {
+        bigint id PK "원본 번호"
+        bigint user_id FK "주인"
+        varchar problem_text "문제 글 (수식은 $...$)"
+        boolean is_correct "학생이 맞혔는지"
+        boolean has_figure "그림이 있어야 풀 수 있는지"
+        varchar unit_code "단원 코드 (taxonomy.json)"
+        varchar type_code "유형 코드 (taxonomy.json)"
+        varchar support_status "SUPPORTED, PENDING_CLASSIFICATION, NEEDS_REVIEW, UNSUPPORTED_FIGURE"
+        varchar fingerprint "같은 문제인지 보는 지문"
+        timestamptz solved_at "푼 순간"
+    }
+    source_problem_choices {
+        bigint source_problem_id FK "어느 원본의 선지인지"
+        int position "선지 순서"
+        varchar text "선지 글"
+    }
+    review_items {
+        bigint id PK "학습 항목 번호"
+        bigint user_id FK "주인"
+        bigint source_problem_id "원본 번호"
+        bigint active_source_problem_id "ACTIVE 일 때만 원본 번호 (유니크, 같은 원본에 ACTIVE 하나)"
+        varchar status "ACTIVE, GRADUATED, MASTERED"
+        int current_level "레벨 -1, 0, 1"
+        int wrong_streak "지금 레벨의 연속 오답"
+        boolean needs_attention "비계에서도 계속 틀림"
+        date next_due_date "다음에 낼 날"
+    }
+    variants {
+        bigint id PK "변형 번호 (생성 시도 하나)"
+        bigint user_id FK "주인"
+        bigint source_problem_id "원본 번호"
+        int level "레벨 -1, 0, 1, 2"
+        varchar format "MC5, SHORT"
+        varchar status "VERIFIED, REJECTED"
+        varchar verification_code "AI 가 쓴 Symja 검증 코드 (학생에게 안 보냄)"
+        varchar rejection_reason "떨어진 이유"
+    }
+    variant_choices {
+        bigint variant_id FK "어느 변형의 선지인지"
+        int position "섞은 뒤 순서"
+        varchar value_expr "선지 값 (Symja 식)"
+        varchar latex "화면용 LaTeX (샌드박스가 만듦)"
+        varchar rationale "어떤 실수인지 (정답은 빈 글자)"
+    }
+    weekly_sets {
+        bigint id PK "세트 번호"
+        bigint user_id FK "주인"
+        date week_start "돌아보는 주의 월요일 (2026-10-19)"
+        date due_date "마감 날"
+    }
+    assignments {
+        bigint id PK "과제 번호"
+        bigint user_id FK "주인"
+        bigint variant_id "낸 변형 (VERIFIED, 유니크)"
+        bigint review_item_id "이어진 학습 항목"
+        bigint daily_review_item_id "일일 과제일 때만 항목 번호 (날짜와 함께 유니크)"
+        varchar kind "DAILY, WEEKLY_CORRECT_TYPE, WEEKLY_WRONG_DEEP"
+        date assigned_date "낸 날"
+        date due_date "마감 날"
+        varchar status "PENDING, ANSWERED, EXPIRED"
+    }
+    attempts {
+        bigint id PK "답 번호"
+        bigint user_id FK "주인"
+        bigint assignment_id "어느 과제의 답인지 (유니크, 과제당 한 번)"
+        varchar submitted_answer "낸 답"
+        boolean is_correct "맞았는지"
+    }
 ```
 
 <!-- DB-DIAGRAM:END -->
@@ -952,6 +1035,12 @@ erDiagram
 
 > **운영 DB 에만 있는 `seed_6m_rows` 표** — 2026-10-24 발표용 가상 데이터 6개월치를 넣으면서, 넣은 줄의 번호를 적어 둔 표입니다.
 > 엔티티가 없어서 위 그림 · `db/schema.sql` 에는 없습니다. 지울 때 이 표를 씁니다. → [DEMO-SEED.md](./DEMO-SEED.md)
+
+> 변형 문제의 8개 테이블(`source_problems` · `source_problem_choices` · `review_items` · `variants` · `variant_choices` · `weekly_sets` · `assignments` · `attempts`)은 2026-10-24 에 더했습니다. 규칙과 근거는 [docs/VARIANT-SPEC.md](./VARIANT-SPEC.md) 4장입니다.
+> - ⚠️ **이 테이블들은 팀의 설계 문서(claude.ai 에서 만든 변형 모듈 SPEC)를 그대로 옮긴 것이고, 이 저장소의 방식대로 학생이 직접 설계한 것이 아닙니다.** 담당 학생이 그림을 보고 칸 이름 · 뜻을 확인해 주세요.
+> - 모든 테이블에 `user_id` 가 있어서 탈퇴하면 같이 지워집니다. 테이블끼리는 **번호만 적고 외래키를 걸지 않습니다**(그림의 "번호만" 선). 탈퇴할 때 테이블을 순서 없이 지우기 때문입니다. 선지 딸린 테이블 두 개는 `AccountServiceTest` 의 `CHILD_TABLES` 에 더했습니다.
+> - "같은 원본에 ACTIVE 학습 항목은 하나" · "한 항목에 하루 한 과제" 는 원래 설계의 **부분 유니크 인덱스** 대신 **있을 때만 채우는 칸 + 유니크**(`active_source_problem_id`, `daily_review_item_id`)로 지킵니다. 로컬 DB(H2)가 부분 인덱스를 지원하지 않기 때문입니다. 비어 있는(null) 칸끼리는 겹친다고 보지 않습니다.
+> - `value` 는 H2 예약어라서 `value_expr` 로 했습니다. (주간 세트는 같은 저장소의 weekly_goals 처럼 `week_start` 날짜를 씁니다)
 
 ## 그림 읽는 법
 

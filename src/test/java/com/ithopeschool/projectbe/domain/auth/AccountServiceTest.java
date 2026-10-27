@@ -49,6 +49,10 @@ import com.ithopeschool.projectbe.domain.subject.Subject;
 import com.ithopeschool.projectbe.domain.subject.SubjectColor;
 import com.ithopeschool.projectbe.domain.thinkingtest.ThinkingTest;
 import com.ithopeschool.projectbe.domain.user.UserRepository;
+import com.ithopeschool.projectbe.domain.variant.SourceProblem;
+import com.ithopeschool.projectbe.domain.variant.Variant;
+import com.ithopeschool.projectbe.domain.variant.VariantChoice;
+import com.ithopeschool.projectbe.domain.variant.VariantFormat;
 import com.ithopeschool.projectbe.global.auth.CurrentUserProvider;
 import com.ithopeschool.projectbe.global.exception.ApiException;
 import com.ithopeschool.projectbe.global.exception.ErrorCode;
@@ -616,7 +620,11 @@ class AccountServiceTest {
           // 심리검사(psych_tests)에 매달린 문장 14개의 답 (이슈 #219)
           Map.entry("PSYCH_TEST_ANSWERS", new String[] {"PSYCH_TESTS", "PSYCH_TEST_ID"}),
           // 자기 실험(experiments)에 매달린 "실험 규칙을 붙인 카드" (이슈 #52)
-          Map.entry("EXPERIMENT_CARDS", new String[] {"EXPERIMENTS", "EXPERIMENT_ID"}));
+          Map.entry("EXPERIMENT_CARDS", new String[] {"EXPERIMENTS", "EXPERIMENT_ID"}),
+          // 변형 문제: 원본 문항 · 변형 문항에 매달린 선지 (docs/VARIANT-SPEC.md 4장)
+          Map.entry(
+              "SOURCE_PROBLEM_CHOICES", new String[] {"SOURCE_PROBLEMS", "SOURCE_PROBLEM_ID"}),
+          Map.entry("VARIANT_CHOICES", new String[] {"VARIANTS", "VARIANT_ID"}));
 
   // 사람이 아니라 학교마다 한 벌인 공개 자료(NEIS 학사일정, 이슈 #282)입니다. 개인 정보가 없고
   // 같은 학교 학생들이 같이 쓰므로 탈퇴해도 지우지 않습니다.
@@ -734,6 +742,28 @@ class AccountServiceTest {
               LocalDate.of(2026, 10, 12),
               RiskLevel.WATCH,
               EnumSet.of(RiskReason.LATE_SLEEP)));
+      // 변형 문제: 객관식 원본과 변형의 선지(딸린 테이블)에도 줄을 넣어 둡니다.
+      SourceProblem source =
+          new SourceProblem(userId, "원본 문제", List.of("1", "2"), "1", "2", false, false, NOW, NOW);
+      entityManager.persist(source);
+      entityManager.persist(
+          Variant.verified(
+              userId,
+              source.getId(),
+              0,
+              VariantFormat.MC5,
+              "변형 문제",
+              List.of(new VariantChoice("1", "1", ""), new VariantChoice("2", "2", "실수")),
+              0,
+              null,
+              "1",
+              "해설",
+              "k = 1; k",
+              "{}",
+              "test-model",
+              "variant_v2",
+              1,
+              NOW));
     }
     entityManager.flush();
     callWith(tokenOfA);

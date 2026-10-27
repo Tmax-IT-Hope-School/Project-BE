@@ -18,5 +18,9 @@ public enum GptUsageKind {
   CHECKLIST,
   // 작은 AI 기능 묶음: 예상 실패 원인 선지 · 개선안 문장 다듬기 등 (AiClient, 이슈 #237 · #51)
   //   기능마다 종류를 따로 만들면 그때마다 운영 DB 의 허용값을 사람이 고쳐야 해서, #237 의 기능들은 이 하나를 같이 씁니다.
-  ASSIST
+  ASSIST,
+  // 변형 문제: 변형 생성 · 원본 분류 · 독립 풀이 검사 (GptVariantAi, docs/VARIANT-SPEC.md)
+  //   변형 하나에 AI 호출이 여러 번(최대 3번 + 검사)이라 비용을 따로 보려고 종류를 나눴습니다.
+  //   운영 DB 의 허용값은 db/migrations/22-variant-problems.sql 이 늘립니다.
+  VARIANT
 }
