@@ -6,7 +6,9 @@ import com.ithopeschool.projectbe.domain.care.ToneGuide;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 // "사진 채점" 에서 AI 에게 건넬 질문과, 받은 답을 고르는 규칙입니다. (2026-10-24 사용자 결정)
 // 값만 계산하는 도구라서 객체를 만들 일이 없습니다.
@@ -21,6 +23,13 @@ public final class AnswerGrading {
 
   // 한 장에서 받는 문제의 최대 개수. 문제집 한 쪽은 보통 이보다 적습니다.
   public static final int MAX_ITEMS = 40;
+
+  // AI 가 표시 모양을 "O" · "X" 대신 그대로 옮겨 적을 때가 있어서 넓게 받습니다. (2026-10-27 사용자 "O X 를 좀 넓게")
+  // 대문자로 바꾼 뒤 비교합니다. 체크(✓) · 세모(△)는 학교마다 뜻이 달라서 넣지 않습니다. (애매)
+  private static final Set<String> O_MARKS =
+      Set.of("O", "○", "◯", "⭕", "〇", "0", "ㅇ", "동그라미", "맞음");
+  private static final Set<String> X_MARKS =
+      Set.of("X", "×", "✕", "✗", "✖", "❌", "/", "\\", "가위표", "빗금", "틀림");
 
   // AI 가 돌려주는 JSON 모양 그대로입니다.
   //   { "crisis": false, "problemPage": true, "subjectText": "수학",
@@ -93,15 +102,33 @@ public final class AnswerGrading {
     return oneLine.length() <= maxLength ? oneLine : oneLine.substring(0, maxLength);
   }
 
-  // "O" · "X" 만 받습니다. 그 밖(세모, 빈칸 등)은 못 읽은 것(null)으로 봅니다.
+  // 동그라미 쪽 글자(O_MARKS)는 O, 가위표 · 빗금 쪽 글자(X_MARKS)는 X 입니다. 그 밖(세모, 체크, 빈칸 등)은 못 읽은 것(null)으로 봅니다.
+  //   markOf(" o ") -> O,  markOf("○") -> O,  markOf("/") -> X,  markOf("△") -> null
   static MarkRead markOf(String markRead) {
-    if ("O".equals(markRead)) {
+    if (markRead == null) {
+      return null;
+    }
+    String mark = markRead.trim().toUpperCase(Locale.ROOT);
+    if (O_MARKS.contains(mark)) {
       return MarkRead.O;
     }
-    if ("X".equals(markRead)) {
+    if (X_MARKS.contains(mark)) {
       return MarkRead.X;
     }
     return null;
+  }
+
+  // 채점했어요(MARKED)인데 문제는 읽었고 O · X 표시는 하나도 못 읽었는지 알려 줍니다.
+  // 같은 사진인데 AI 가 가끔 표시를 통째로 놓쳐서(2026-10-27 같은 16문제 페이지가 첫 번째는 전부 애매, 40초 뒤에는 16개 다 읽힘)
+  // 이럴 때 AnswerCheckService 가 한 번 더 물어봅니다. 위기 표현 · 문제 사진 아님은 다시 묻지 않습니다.
+  public static boolean readNoMarks(AnswerCheckMode mode, Answer answer) {
+    if (mode != AnswerCheckMode.MARKED
+        || !Boolean.TRUE.equals(answer.problemPage())
+        || Boolean.TRUE.equals(answer.crisis())) {
+      return false;
+    }
+    List<Graded> items = gradedItems(mode, answer.items());
+    return !items.isEmpty() && items.stream().allMatch(item -> item.markRead() == null);
   }
 
   // O → 맞음, X → 틀림, 못 읽음 → 애매
@@ -157,9 +184,12 @@ public final class AnswerGrading {
             + AnswerCheck.MAX_SUBJECT_LENGTH
             + "자까지. 분명하지 않으면 null.");
     if (mode == AnswerCheckMode.MARKED) {
-      lines.add("4. 학생이 이미 채점한 페이지야. 문제를 직접 풀지 마. 학생이 문제 번호 근처에 그린 채점 표시만 읽어.");
-      lines.add(
-          "   markRead: 동그라미면 \"O\", 가위표 · 빗금이면 \"X\". 표시가 없거나, 세모 · 지운 자국처럼 O · X 가 아니거나, 잘 안 보이면 null.");
+      lines.add("4. 학생이 이미 채점한 페이지야. 문제를 직접 풀지 마. 학생이 문제 번호 · 답 근처에 펜으로 그린 채점 표시만 읽어.");
+      lines.add("   markRead 는 꼭 \"O\" · \"X\" · null 중 하나로 써. 다른 글자(○, ×, ✓ 등)로 옮겨 적지 마.");
+      lines.add("   \"O\": 동그라미 모양이면 넓게 O. 이중 동그라미, 덜 닫힌 동그라미, 번호나 답을 감싼 동그라미, 삐뚤거나 흐린 동그라미도 O.");
+      lines.add("   \"X\": 가위표, 빗금(/ 또는 \\), 답 위에 그은 줄처럼 틀렸다는 표시면 넓게 X. 삐뚤거나 흐려도 모양이 가까우면 X.");
+      lines.add("   null: 그 문제 근처에 채점 표시가 정말 없을 때, 또는 세모 · 체크(✓) · 별표처럼 O · X 가 아닌 표시일 때만.");
+      lines.add("   표시가 조금 흐리거나 작다고 null 로 하지 마. 5번의 '자신 없으면 UNSURE' 는 표시가 있는지조차 모를 때만 적용돼.");
       lines.add("   aiAnswer 는 항상 null. result 는 O 면 CORRECT, X 면 WRONG, null 이면 UNSURE.");
       lines.add("   O · X 표시가 없는 문제도 빼지 말고 items 에 넣어. markRead 는 null, result 는 UNSURE.");
     } else {
