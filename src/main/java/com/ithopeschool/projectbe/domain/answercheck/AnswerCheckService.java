@@ -65,13 +65,16 @@ public class AnswerCheckService {
     CardPhotoService.checkImage(request.image());
 
     // 2) 사진과 함께 AI
-    Optional<AnswerGrading.Answer> answer =
-        aiClient.askWithImage(
-            userId,
-            GptUsageKind.ASSIST,
-            AnswerGrading.question(mode),
-            request.image(),
-            AnswerGrading.Answer.class);
+    Optional<AnswerGrading.Answer> answer = askAi(userId, mode, request.image());
+    // 채점했어요(MARKED)인데 O · X 표시를 하나도 못 읽었으면 한 번만 더 물어봅니다. (2026-10-27 "2번 올려야 인식")
+    // 다시 물어도 못 읽으면 처음 답을 그대로 씁니다. AI 를 두 번 기다려서 FE 는 이 요청을 65초까지 기다립니다.
+    if (answer.isPresent() && AnswerGrading.readNoMarks(mode, answer.get())) {
+      log.info("[사진 채점] O · X 표시를 하나도 못 읽어서 한 번 더 물어봅니다");
+      Optional<AnswerGrading.Answer> again = askAi(userId, mode, request.image());
+      if (again.isPresent() && !AnswerGrading.readNoMarks(mode, again.get())) {
+        answer = again;
+      }
+    }
     if (answer.isEmpty()) {
       return AnswerCheckResponse.notGraded(AnswerCheckResponse.UNAVAILABLE, date, mode);
     }
@@ -120,6 +123,16 @@ public class AnswerCheckService {
           }
           return AnswerCheckResponse.of(check, answerCheckItemRepository.saveAll(rows));
         });
+  }
+
+  // 사진과 질문을 AI 에게 한 번 보냅니다. 답을 못 받으면(시간 초과 · 키 없음 등) 비어 있습니다.
+  private Optional<AnswerGrading.Answer> askAi(Long userId, AnswerCheckMode mode, String image) {
+    return aiClient.askWithImage(
+        userId,
+        GptUsageKind.ASSIST,
+        AnswerGrading.question(mode),
+        image,
+        AnswerGrading.Answer.class);
   }
 
   // 내 그날의 채점 기록들, 최근에 올린 것부터. PC 가 3초마다 부르므로 DB 는 두 번만 부릅니다. (기록들 · 그 문제들)

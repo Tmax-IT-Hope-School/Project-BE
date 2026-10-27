@@ -9,6 +9,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
@@ -206,6 +207,66 @@ class AnswerCheckServiceTest {
         .containsExactly(
             tuple(12L, USER_ID, 0, GradeResult.CORRECT, GradeResult.CORRECT, null),
             tuple(12L, USER_ID, 1, GradeResult.WRONG, GradeResult.WRONG, null));
+  }
+
+  @Test
+  @DisplayName("채점했어요(MARKED)인데 O · X 를 하나도 못 읽었으면 한 번 더 묻고, 읽은 답을 쓴다")
+  void retriesOnceWhenNoMarksRead() {
+    AnswerGrading.Answer noMarks =
+        new AnswerGrading.Answer(
+            false,
+            true,
+            "수학",
+            List.of(item("1", null, null, null, "UNSURE"), item("2", null, null, null, "UNSURE")));
+    AnswerGrading.Answer withMarks =
+        new AnswerGrading.Answer(
+            false,
+            true,
+            "수학",
+            List.of(item("1", null, null, "O", "CORRECT"), item("2", null, null, "x", "WRONG")));
+    given(aiClient.askWithImage(any(), any(), any(), any(), eq(AnswerGrading.Answer.class)))
+        .willReturn(Optional.of(noMarks), Optional.of(withMarks));
+
+    AnswerCheckResponse response = service.create(request(AnswerCheckMode.MARKED));
+
+    verify(aiClient, times(2))
+        .askWithImage(any(), any(), any(), any(), eq(AnswerGrading.Answer.class));
+    assertThat(response.counts()).isEqualTo(new AnswerCheckResponse.Counts(1, 1, 0));
+  }
+
+  @Test
+  @DisplayName("다시 물어도 O · X 를 못 읽으면 처음 답(전부 애매)을 쓰고, 세 번은 묻지 않는다")
+  void keepsFirstAnswerWhenRetryAlsoReadsNoMarks() {
+    AnswerGrading.Answer noMarks =
+        new AnswerGrading.Answer(false, true, null, List.of(item("1", null, null, null, "UNSURE")));
+    given(aiClient.askWithImage(any(), any(), any(), any(), eq(AnswerGrading.Answer.class)))
+        .willReturn(Optional.of(noMarks), Optional.empty());
+
+    AnswerCheckResponse response = service.create(request(AnswerCheckMode.MARKED));
+
+    verify(aiClient, times(2))
+        .askWithImage(any(), any(), any(), any(), eq(AnswerGrading.Answer.class));
+    assertThat(response.graded()).isTrue();
+    assertThat(response.counts()).isEqualTo(new AnswerCheckResponse.Counts(0, 0, 1));
+  }
+
+  @Test
+  @DisplayName("표시를 하나라도 읽었거나 아직 안 했어요(UNMARKED)면 다시 묻지 않는다")
+  void noRetryWhenSomeMarksReadOrUnmarked() {
+    givenAnswer(
+        new AnswerGrading.Answer(
+            false,
+            true,
+            null,
+            List.of(item("1", null, null, "O", "CORRECT"), item("2", null, null, null, "UNSURE"))));
+    service.create(request(AnswerCheckMode.MARKED));
+
+    givenAnswer(
+        new AnswerGrading.Answer(false, true, null, List.of(item("1", null, "3", null, "UNSURE"))));
+    service.create(request(AnswerCheckMode.UNMARKED));
+
+    verify(aiClient, times(2))
+        .askWithImage(any(), any(), any(), any(), eq(AnswerGrading.Answer.class));
   }
 
   @Test
