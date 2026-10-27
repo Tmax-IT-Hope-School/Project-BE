@@ -49,6 +49,51 @@ class AnswerGradingTest {
   }
 
   @Test
+  @DisplayName("O · X 표시는 넓게 받는다: 동그라미 쪽 글자는 O, 가위표 · 빗금 쪽 글자는 X, 세모 · 체크는 못 읽음")
+  void marksAreReadBroadly() {
+    for (String mark : List.of("O", "o", " O ", "○", "◯", "⭕", "〇", "0", "동그라미")) {
+      assertThat(AnswerGrading.markOf(mark)).as(mark).isEqualTo(MarkRead.O);
+    }
+    for (String mark : List.of("X", "x", "×", "✕", "✗", "❌", "/", "\\", "빗금")) {
+      assertThat(AnswerGrading.markOf(mark)).as(mark).isEqualTo(MarkRead.X);
+    }
+    for (String mark : List.of("△", "✓", "V", "", "  ")) {
+      assertThat(AnswerGrading.markOf(mark)).as(mark).isNull();
+    }
+    assertThat(AnswerGrading.markOf(null)).isNull();
+  }
+
+  @Test
+  @DisplayName("채점했어요(MARKED)에서 문제는 읽고 O · X 를 하나도 못 읽었을 때만 '다시 물어볼 것' 이다")
+  void readNoMarks() {
+    AnswerGrading.Answer none =
+        new AnswerGrading.Answer(false, true, null, List.of(item("1", null, null, null, "UNSURE")));
+    AnswerGrading.Answer oneRead =
+        new AnswerGrading.Answer(
+            false,
+            true,
+            null,
+            List.of(item("1", null, null, "○", "CORRECT"), item("2", null, null, null, "UNSURE")));
+
+    assertThat(AnswerGrading.readNoMarks(AnswerCheckMode.MARKED, none)).isTrue();
+    assertThat(AnswerGrading.readNoMarks(AnswerCheckMode.MARKED, oneRead)).isFalse();
+    assertThat(AnswerGrading.readNoMarks(AnswerCheckMode.UNMARKED, none)).isFalse();
+    // 문제 사진이 아님 · 위기 표현 · 문제가 하나도 없음은 다시 묻지 않습니다.
+    assertThat(
+            AnswerGrading.readNoMarks(
+                AnswerCheckMode.MARKED, new AnswerGrading.Answer(false, false, null, List.of())))
+        .isFalse();
+    assertThat(
+            AnswerGrading.readNoMarks(
+                AnswerCheckMode.MARKED, new AnswerGrading.Answer(true, true, null, none.items())))
+        .isFalse();
+    assertThat(
+            AnswerGrading.readNoMarks(
+                AnswerCheckMode.MARKED, new AnswerGrading.Answer(false, true, null, List.of())))
+        .isFalse();
+  }
+
+  @Test
   @DisplayName("과목 이름은 비었으면 null, 30자에서 자른다")
   void subject() {
     assertThat(AnswerGrading.subjectOf(" 수학 ")).isEqualTo("수학");
@@ -72,6 +117,8 @@ class AnswerGradingTest {
     assertThat(unmarked.instructions()).doesNotContain("번호가 붙은 문제와 학생이 쓴 답이 있으면 true");
     assertThat(unmarked.instructions()).contains("학생이 답을 안 쓴 문제도 빼지 말고 items 에 넣어");
     assertThat(marked.instructions()).contains("O · X 표시가 없는 문제도 빼지 말고 items 에 넣어");
+    // O · X 를 넓게 읽고, 흐리다고 null 로 하지 않게 합니다. (2026-10-27)
+    assertThat(marked.instructions()).contains("넓게 O", "넓게 X", "흐리거나 작다고 null 로 하지 마");
     assertThat(marked.input()).contains("채점함");
     assertThat(unmarked.input()).contains("채점하지 않음");
     assertThat(marked.schema()).containsKey("properties");
