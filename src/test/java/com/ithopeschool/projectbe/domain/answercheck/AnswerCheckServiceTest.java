@@ -90,7 +90,7 @@ class AnswerCheckServiceTest {
   }
 
   private void givenAnswer(AnswerGrading.Answer answer) {
-    given(aiClient.askWithImage(any(), any(), any(), any(), eq(AnswerGrading.Answer.class)))
+    given(aiClient.askPhotoGrading(any(), any(), any(), any(), eq(AnswerGrading.Answer.class)))
         .willReturn(Optional.ofNullable(answer));
   }
 
@@ -143,7 +143,7 @@ class AnswerCheckServiceTest {
             tuple("33", "3", "12", null, GradeResult.UNSURE, false),
             tuple("34", "3-1", "0.5", null, GradeResult.UNSURE, false));
     verify(aiClient)
-        .askWithImage(
+        .askPhotoGrading(
             eq(USER_ID), eq(GptUsageKind.ASSIST), any(), eq(IMAGE), eq(AnswerGrading.Answer.class));
   }
 
@@ -224,13 +224,13 @@ class AnswerCheckServiceTest {
             true,
             "수학",
             List.of(item("1", null, null, "O", "CORRECT"), item("2", null, null, "x", "WRONG")));
-    given(aiClient.askWithImage(any(), any(), any(), any(), eq(AnswerGrading.Answer.class)))
+    given(aiClient.askPhotoGrading(any(), any(), any(), any(), eq(AnswerGrading.Answer.class)))
         .willReturn(Optional.of(noMarks), Optional.of(withMarks));
 
     AnswerCheckResponse response = service.create(request(AnswerCheckMode.MARKED));
 
     verify(aiClient, times(2))
-        .askWithImage(any(), any(), any(), any(), eq(AnswerGrading.Answer.class));
+        .askPhotoGrading(any(), any(), any(), any(), eq(AnswerGrading.Answer.class));
     assertThat(response.counts()).isEqualTo(new AnswerCheckResponse.Counts(1, 1, 0));
   }
 
@@ -239,13 +239,39 @@ class AnswerCheckServiceTest {
   void keepsFirstAnswerWhenRetryAlsoReadsNoMarks() {
     AnswerGrading.Answer noMarks =
         new AnswerGrading.Answer(false, true, null, List.of(item("1", null, null, null, "UNSURE")));
-    given(aiClient.askWithImage(any(), any(), any(), any(), eq(AnswerGrading.Answer.class)))
+    given(aiClient.askPhotoGrading(any(), any(), any(), any(), eq(AnswerGrading.Answer.class)))
         .willReturn(Optional.of(noMarks), Optional.empty());
 
     AnswerCheckResponse response = service.create(request(AnswerCheckMode.MARKED));
 
     verify(aiClient, times(2))
-        .askWithImage(any(), any(), any(), any(), eq(AnswerGrading.Answer.class));
+        .askPhotoGrading(any(), any(), any(), any(), eq(AnswerGrading.Answer.class));
+    assertThat(response.graded()).isTrue();
+    assertThat(response.counts()).isEqualTo(new AnswerCheckResponse.Counts(0, 0, 1));
+  }
+
+  @Test
+  @DisplayName("첫 답이 30초보다 늦게 왔으면 O · X 를 못 읽었어도 다시 묻지 않는다 (FE 가 기다리는 95초 안에 끝내려고)")
+  void noRetryWhenFirstAnswerWasSlow() {
+    // AI 를 부르기 전에는 NOW, 답을 받은 뒤에는 31초가 지난 시계
+    Clock slowClock = mock(Clock.class);
+    given(slowClock.instant()).willReturn(NOW, NOW.plusSeconds(31));
+    AnswerCheckService slowService =
+        new AnswerCheckService(
+            currentUserProvider,
+            answerCheckRepository,
+            answerCheckItemRepository,
+            aiClient,
+            transactionTemplate,
+            slowClock);
+    givenAnswer(
+        new AnswerGrading.Answer(
+            false, true, null, List.of(item("1", null, null, null, "UNSURE"))));
+
+    AnswerCheckResponse response = slowService.create(request(AnswerCheckMode.MARKED));
+
+    verify(aiClient, times(1))
+        .askPhotoGrading(any(), any(), any(), any(), eq(AnswerGrading.Answer.class));
     assertThat(response.graded()).isTrue();
     assertThat(response.counts()).isEqualTo(new AnswerCheckResponse.Counts(0, 0, 1));
   }
@@ -266,7 +292,7 @@ class AnswerCheckServiceTest {
     service.create(request(AnswerCheckMode.UNMARKED));
 
     verify(aiClient, times(2))
-        .askWithImage(any(), any(), any(), any(), eq(AnswerGrading.Answer.class));
+        .askPhotoGrading(any(), any(), any(), any(), eq(AnswerGrading.Answer.class));
   }
 
   @Test

@@ -11,6 +11,8 @@ import com.ithopeschool.projectbe.global.auth.CurrentUserProvider;
 import com.ithopeschool.projectbe.global.exception.ApiException;
 import com.ithopeschool.projectbe.global.exception.ErrorCode;
 import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
@@ -47,6 +49,9 @@ public class AnswerCheckService {
   // 주간 리포트는 7일이면 되지만, 다른 기간 조회(일기 · 미루기 표시)와 같은 31일로 맞췄습니다.
   static final int MAX_RANGE_DAYS = 31;
 
+  // O · X 를 하나도 못 읽었을 때 다시 묻는 것은 첫 답이 이 시간 안에 왔을 때만입니다. (아래 create 의 2번)
+  static final Duration RETRY_ONLY_WITHIN = Duration.ofSeconds(30);
+
   private final CurrentUserProvider currentUserProvider;
   private final AnswerCheckRepository answerCheckRepository;
   private final AnswerCheckItemRepository answerCheckItemRepository;
@@ -54,7 +59,7 @@ public class AnswerCheckService {
   private final TransactionTemplate transactionTemplate;
   private final Clock clock;
 
-  // AI 를 기다리는 동안(최대 25초) DB 연결을 붙잡지 않으려고 메서드 전체에 @Transactional 을 붙이지 않았습니다.
+  // AI 를 기다리는 동안(한 번에 최대 50초) DB 연결을 붙잡지 않으려고 메서드 전체에 @Transactional 을 붙이지 않았습니다.
   // 저장하는 부분(5번)만 transactionTemplate 으로 묶습니다.
   public AnswerCheckResponse create(AnswerCheckCreateRequest request) {
     Long userId = currentUserProvider.getCurrentUserId();
@@ -65,10 +70,14 @@ public class AnswerCheckService {
     CardPhotoService.checkImage(request.image());
 
     // 2) 사진과 함께 AI
+    Instant askedAt = clock.instant();
     Optional<AnswerGrading.Answer> answer = askAi(userId, mode, request.image());
     // 채점했어요(MARKED)인데 O · X 표시를 하나도 못 읽었으면 한 번만 더 물어봅니다. (2026-10-27 "2번 올려야 인식")
-    // 다시 물어도 못 읽으면 처음 답을 그대로 씁니다. AI 를 두 번 기다려서 FE 는 이 요청을 65초까지 기다립니다.
-    if (answer.isPresent() && AnswerGrading.readNoMarks(mode, answer.get())) {
+    // 다시 물어도 못 읽으면 처음 답을 그대로 씁니다.
+    // 첫 답이 30초 안에 왔을 때만 다시 묻습니다. 그래야 길어도 30초 + 50초 = 80초 안에 끝나고, FE 는 95초까지 기다립니다.
+    boolean hasTimeToRetry =
+        Duration.between(askedAt, clock.instant()).compareTo(RETRY_ONLY_WITHIN) <= 0;
+    if (answer.isPresent() && AnswerGrading.readNoMarks(mode, answer.get()) && hasTimeToRetry) {
       log.info("[사진 채점] O · X 표시를 하나도 못 읽어서 한 번 더 물어봅니다");
       Optional<AnswerGrading.Answer> again = askAi(userId, mode, request.image());
       if (again.isPresent() && !AnswerGrading.readNoMarks(mode, again.get())) {
@@ -125,9 +134,9 @@ public class AnswerCheckService {
         });
   }
 
-  // 사진과 질문을 AI 에게 한 번 보냅니다. 답을 못 받으면(시간 초과 · 키 없음 등) 비어 있습니다.
+  // 사진과 질문을 AI 에게 한 번 보냅니다. 답을 50초까지 기다리고, 못 받으면(시간 초과 · 키 없음 등) 비어 있습니다.
   private Optional<AnswerGrading.Answer> askAi(Long userId, AnswerCheckMode mode, String image) {
-    return aiClient.askWithImage(
+    return aiClient.askPhotoGrading(
         userId,
         GptUsageKind.ASSIST,
         AnswerGrading.question(mode),
