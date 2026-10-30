@@ -1,20 +1,24 @@
 package com.ithopeschool.projectbe.domain.call;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.ithopeschool.projectbe.domain.call.dto.CallSessionRequest;
 import com.ithopeschool.projectbe.domain.call.dto.ChatReplyResponse;
 import java.util.Collections;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.http.MediaType;
@@ -179,6 +183,35 @@ class ChatControllerTest {
   }
 
   @Test
+  @DisplayName("새 대화(fresh: true)로 열면 그 표시를 로직에 넘기고, 안 보내면 새 대화가 아니다 (2026-10-31)")
+  void startsFresh() throws Exception {
+    given(chatService.start(any(), any(), any(), anyBoolean()))
+        .willReturn(ChatReplyResponse.opened(12L));
+
+    postJson("/api/v1/chats?greet=false", "{\"careLevel\":2,\"maxHarshness\":3,\"fresh\":true}")
+        .andExpect(status().isOk());
+    postJson("/api/v1/chats?greet=false", "{\"careLevel\":2,\"maxHarshness\":3}")
+        .andExpect(status().isOk());
+
+    ArgumentCaptor<CallSessionRequest> sent = ArgumentCaptor.forClass(CallSessionRequest.class);
+    verify(chatService, times(2)).start(sent.capture(), any(), any(), eq(false));
+    assertThat(sent.getAllValues().get(0).startsFresh()).isTrue();
+    assertThat(sent.getAllValues().get(1).startsFresh()).isFalse();
+  }
+
+  @Test
+  @DisplayName("요청에 서버가 모르는 칸이 있어도 400 없이 무시한다 (새 FE 가 예전 서버에 새 칸을 보내도 열림)")
+  void ignoresUnknownFields() throws Exception {
+    given(chatService.start(any(), any(), any(), anyBoolean()))
+        .willReturn(ChatReplyResponse.opened(12L));
+
+    postJson(
+            "/api/v1/chats?greet=false",
+            "{\"careLevel\":2,\"maxHarshness\":3,\"notYetKnown\":true}")
+        .andExpect(status().isOk());
+  }
+
+  @Test
   @DisplayName("말 보내기에 사진(image)을 붙일 수 있고, 5,600,000자를 넘으면 400 이다")
   void sendsImage() throws Exception {
     given(chatService.send(eq(12L), any())).willReturn(ChatReplyResponse.of(12L, "어디까지 풀었어?"));
@@ -193,6 +226,24 @@ class ChatControllerTest {
             "/api/v1/chats/12/messages",
             "{\"lines\":[{\"speaker\":\"me\",\"text\":\"이 문제\"}],\"image\":\"" + tooBig + "\"}")
         .andExpect(status().isBadRequest());
+    verify(chatService).send(eq(12L), any());
+  }
+
+  @Test
+  @DisplayName("AI 의 긴 말(과목 쌤의 문제 목록 · 풀이)도 1000자까지는 다시 보낼 수 있고, 1001자면 400 이다 (2026-10-31)")
+  void acceptsLongAiLineUpTo1000() throws Exception {
+    given(chatService.send(eq(12L), any())).willReturn(ChatReplyResponse.of(12L, "다 맞았어!"));
+    String me = "{\"speaker\":\"me\",\"text\":\"1번 무단 통치\"}";
+
+    postJson(
+            "/api/v1/chats/12/messages",
+            "{\"lines\":[{\"speaker\":\"ai\",\"text\":\"" + "가".repeat(1000) + "\"}," + me + "]}")
+        .andExpect(status().isOk());
+    postJson(
+            "/api/v1/chats/12/messages",
+            "{\"lines\":[{\"speaker\":\"ai\",\"text\":\"" + "가".repeat(1001) + "\"}," + me + "]}")
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.error.message").value("자막 한 줄(text)은 1000자까지예요"));
     verify(chatService).send(eq(12L), any());
   }
 }

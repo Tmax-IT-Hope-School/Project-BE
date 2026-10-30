@@ -73,7 +73,14 @@ public record CallSessionRequest(
                     max = OtherRoomTalk.MAX_REQUEST_LINE_LENGTH,
                     message = "다른 방 이야기 한 줄은 200자 이하로 보내 주세요")
                 String>
-            otherRooms) {
+            otherRooms,
+    // 새 대화 (2026-10-31, 상담 채팅 열기만): 학생이 [＋ 새 대화] 를 눌러 연 채팅이면 true 입니다.
+    // true 면 이 채팅 대본에 [지난 통화](와 그 약속을 묻는 순서)를 넣지 않고,
+    // 말 보내기의 다른 방 이야기([다른 방에서 오늘 한 이야기])도 이 채팅이 끝날 때까지 붙이지 않습니다. (ChatScriptStore)
+    // "새 대화 눌러도 이전 걸 계속 참고하고 이어져서" — 학생이 직접 고른 새 대화만 깨끗하게 시작하려는 것입니다.
+    // 날이 바뀌거나 오래 쉬어서 FE 가 저절로 여는 새 채팅은 지금처럼 이어집니다(null). 음성 통화는 이 칸을 쓰지 않습니다.
+    // 없거나 false 면 예전과 같습니다. (이 칸을 모르는 예전 FE 도 그대로 동작)
+    Boolean fresh) {
 
   // 받을 수 있는 방 이름들입니다. ChatRoom 에 방을 더하면 여기에도 더해야 합니다. (ChatRoomTest 가 확인)
   // 맨 끝의 GOAL_MATE 는 예전 이름이라 받기만 하고 PLANNER 로 바꿉니다. (ChatRoom.from)
@@ -137,6 +144,35 @@ public record CallSessionRequest(
         room,
         studySignals,
         null);
+  }
+
+  // 새 대화 표시 없이 보내는 모양 (통화 · 테스트에서 씀, 2026-10-31 전의 모양)
+  public CallSessionRequest(
+      Integer careLevel,
+      Integer maxHarshness,
+      Card card,
+      List<String> selfReportedBiases,
+      List<String> selfReportedWeaknesses,
+      ChatAbout about,
+      String room,
+      StudySignals studySignals,
+      List<String> otherRooms) {
+    this(
+        careLevel,
+        maxHarshness,
+        card,
+        selfReportedBiases,
+        selfReportedWeaknesses,
+        about,
+        room,
+        studySignals,
+        otherRooms,
+        null);
+  }
+
+  // [＋ 새 대화] 로 연 채팅인지. 없으면(null) 아닙니다.
+  public boolean startsFresh() {
+    return Boolean.TRUE.equals(fresh);
   }
 
   // 받을 수 있는 생각 습관 이름들입니다. CognitiveBias 에 습관을 더하면 여기에도 더해야 합니다. (CallControllerTest 가 확인)

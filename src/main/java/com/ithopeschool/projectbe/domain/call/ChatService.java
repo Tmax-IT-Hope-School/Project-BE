@@ -64,6 +64,11 @@ import org.springframework.stereotype.Service;
 //   - 말마다: 학생의 마지막 말로 고른 성취기준 몇 줄([관련 성취기준])을 그 한 번의 답에만 붙입니다. (가벼운 RAG)
 //   - 말마다: 검색이 켜져 있으면 웹 검색 도구를 붙이고, 답에 붙은 출처(sources)를 검사해 돌려줍니다. (TutorWebSearch)
 //
+// 새 대화 (2026-10-31): 학생이 [＋ 새 대화] 를 눌러 연 채팅(request.fresh)은 앞의 대화를 이어 가지 않습니다.
+// 대본에 [지난 통화] 를 넣지 않고(CallService.prepareChatScript), 이 채팅이 끝날 때까지 말 보내기의 다른 방 이야기도
+// 붙이지 않습니다(ChatScriptStore 가 기억). [오늘의 사실] · 방 · 교육과정 · 위기 규칙은 그대로입니다.
+// 날이 바뀌거나 오래 쉬어서 저절로 여는 새 채팅은 지금처럼 이어집니다. ("멘토와 연속적인 대화", 2026-10-18)
+//
 // 같은 말 되풀이 막기 (채팅 수정 3): 말 보내기마다 "직전에 한 말을 되풀이하지 마" 라는 고정 [이미 한 말] 칸을 붙이고,
 // 그래도 새 답이 직전 AI 답 3개와 같은 구절이면 한 번만 다시 받습니다. 세 방 모두 같습니다. (RepeatCheck)
 //
@@ -230,7 +235,8 @@ public class ChatService {
     CallRecord record =
         callRecordRepository.save(
             new CallRecord(userId, today, now, script.biasQuestion(), CallChannel.CHAT));
-    chatScriptStore.save(record.getId(), userId, instructions, topic, room, curriculum);
+    chatScriptStore.save(
+        record.getId(), userId, instructions, topic, room, curriculum, request.startsFresh());
     if (first == null) {
       return ChatReplyResponse.opened(record.getId());
     }
@@ -255,7 +261,13 @@ public class ChatService {
     record = callRecordRepository.save(record);
     safetyService.activate(userId);
     chatScriptStore.save(
-        record.getId(), userId, script.instructions() + CRISIS_FOLLOW_UP, null, room);
+        record.getId(),
+        userId,
+        script.instructions() + CRISIS_FOLLOW_UP,
+        null,
+        room,
+        null,
+        request.startsFresh());
     return ChatReplyResponse.crisis(record.getId(), CHAT_CRISIS_REPLY);
   }
 
@@ -289,12 +301,14 @@ public class ChatService {
 
     // 기억해 둔 대본 끝에 [다른 방에서 오늘 한 이야기] 칸을 붙입니다. 이번 한 번의 답에만 쓰고 기억해 둔 대본은 그대로입니다.
     // 다른 방 이야기가 없으면 빈 글자라 대본이 바뀌지 않습니다. (OtherRoomTalk, 2026-10-22)
+    // [＋ 새 대화] 로 연 채팅은 FE 가 보내도 붙이지 않습니다. 앞의 이야기를 이어 가지 않는 새 대화라서입니다. (2026-10-31)
     String instructions =
         chatScriptStore
-                .find(chatId, userId)
-                .orElseThrow(
-                    () -> new ApiException(ErrorCode.CONFLICT, "채팅이 오래되어 끝났어요. 새로 시작해 주세요"))
-            + OtherRoomTalk.chatSection(request.otherRooms());
+            .find(chatId, userId)
+            .orElseThrow(() -> new ApiException(ErrorCode.CONFLICT, "채팅이 오래되어 끝났어요. 새로 시작해 주세요"));
+    if (!chatScriptStore.isFresh(chatId, userId)) {
+      instructions += OtherRoomTalk.chatSection(request.otherRooms());
+    }
     // 주제 없이 연 채팅이면 null 이고, 그러면 tags 는 빈 목록입니다.
     ChatTopic topic = chatScriptStore.findTopic(chatId, userId).orElse(null);
     // 사진은 모양 · 크기부터 봅니다(틀리면 400). AI 를 부르기 전에 거릅니다.

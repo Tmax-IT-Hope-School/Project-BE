@@ -56,6 +56,9 @@ public class AiClient {
   // AI 자기 분석의 답을 기다리는 최대 시간. 분석은 더 큰 모델(app.ai.analysis-model)이라 느려서 28초까지 기다립니다.
   // (FE aiAnalysisApi.ts 는 30초까지 기다립니다. 2026-10-24)
   private static final Duration ANALYSIS_READ_TIMEOUT = Duration.ofSeconds(28);
+  // 사진 채점의 답을 기다리는 최대 시간. 16문제가 빽빽한 시험지 한 장은 25초를 넘겨서 "지금은 채점할 수 없어요" 가 났습니다.
+  // (2026-10-31 시연 준비 중) 그래서 사진 채점만 50초까지 기다립니다. (FE answerChecksApi.ts 는 95초까지 기다립니다)
+  private static final Duration PHOTO_GRADING_READ_TIMEOUT = Duration.ofSeconds(50);
 
   // 받은 JSON 글자를 자바 값으로 바꾸는 도구
   private static final JsonMapper JSON = JsonMapper.builder().build();
@@ -70,6 +73,8 @@ public class AiClient {
   private final RestClient longRestClient;
   // 자기 분석용 (askAnalysis). 기다리는 시간만 다르고 나머지는 restClient 와 같습니다.
   private final RestClient analysisRestClient;
+  // 사진 채점용 (askPhotoGrading). 기다리는 시간만 다르고 나머지는 restClient 와 같습니다.
+  private final RestClient photoGradingRestClient;
 
   // Spring 이 쓰는 생성자입니다. 키와 모델 이름 중 하나라도 비어 있으면 꺼진 상태입니다.
   @Autowired
@@ -85,10 +90,12 @@ public class AiClient {
         gptUsageGuard,
         RestClient.builder().requestFactory(requestFactoryWithTimeouts(READ_TIMEOUT)),
         RestClient.builder().requestFactory(requestFactoryWithTimeouts(LONG_READ_TIMEOUT)),
-        RestClient.builder().requestFactory(requestFactoryWithTimeouts(ANALYSIS_READ_TIMEOUT)));
+        RestClient.builder().requestFactory(requestFactoryWithTimeouts(ANALYSIS_READ_TIMEOUT)),
+        RestClient.builder()
+            .requestFactory(requestFactoryWithTimeouts(PHOTO_GRADING_READ_TIMEOUT)));
   }
 
-  // 테스트에서 가짜 OpenAI 를 끼워 넣을 때 쓰는 생성자입니다. (AiClientTest) 긴 답 · 분석도 같은 가짜 서버로 갑니다.
+  // 테스트에서 가짜 OpenAI 를 끼워 넣을 때 쓰는 생성자입니다. (AiClientTest) 긴 답 · 분석 · 사진 채점도 같은 가짜 서버로 갑니다.
   // 분석 모델은 따로 주지 않아서 model 과 같습니다.
   AiClient(String apiKey, String model, GptUsageGuard gptUsageGuard, RestClient.Builder builder) {
     this(apiKey, model, null, gptUsageGuard, builder);
@@ -101,7 +108,7 @@ public class AiClient {
       String analysisModel,
       GptUsageGuard gptUsageGuard,
       RestClient.Builder builder) {
-    this(apiKey, model, analysisModel, gptUsageGuard, builder, builder, builder);
+    this(apiKey, model, analysisModel, gptUsageGuard, builder, builder, builder, builder);
   }
 
   private AiClient(
@@ -111,7 +118,8 @@ public class AiClient {
       GptUsageGuard gptUsageGuard,
       RestClient.Builder builder,
       RestClient.Builder longBuilder,
-      RestClient.Builder analysisBuilder) {
+      RestClient.Builder analysisBuilder,
+      RestClient.Builder photoGradingBuilder) {
     this.apiKey = apiKey == null ? "" : apiKey.trim();
     this.model = model == null ? "" : model.trim();
     // 분석 모델을 따로 정하지 않았으면(비었으면) 글 모델을 씁니다.
@@ -121,6 +129,7 @@ public class AiClient {
     this.restClient = builder.baseUrl(OPENAI_BASE_URL).build();
     this.longRestClient = longBuilder.baseUrl(OPENAI_BASE_URL).build();
     this.analysisRestClient = analysisBuilder.baseUrl(OPENAI_BASE_URL).build();
+    this.photoGradingRestClient = photoGradingBuilder.baseUrl(OPENAI_BASE_URL).build();
   }
 
   // GPT 를 부를 수 있는 서버인지 알려줍니다. 키와 모델 이름이 둘 다 있어야 true 입니다.
@@ -161,21 +170,49 @@ public class AiClient {
       AiQuestion question,
       String imageDataUrl,
       Class<T> answerType) {
-    // 보내는 모양: [ { "role": "user", "content": [ { "type": "input_text", "text": "..." },
-    //                 { "type": "input_image", "image_url": "data:...", "detail": "auto" } ] } ]
-    List<Map<String, Object>> input =
-        List.of(
-            Map.of(
-                "role",
-                "user",
-                "content",
-                List.of(
-                    Map.of("type", "input_text", "text", question.input()),
-                    Map.of("type", "input_image", "image_url", imageDataUrl, "detail", "auto"))));
-    return send(longRestClient, model, userId, kind, question, input, answerType);
+    return send(
+        longRestClient,
+        model,
+        userId,
+        kind,
+        question,
+        imageInput(question, imageDataUrl),
+        answerType);
   }
 
-  // input 은 글(String)이거나, 사진이 섞인 메시지 목록(askWithImage)입니다.
+  // askWithImage 와 같고, 답을 50초까지 기다립니다. 사진 채점(AnswerCheckService)에서만 씁니다.
+  // 문제 16개쯤 되는 시험지 한 장을 읽으면 25초를 넘길 때가 있어서 따로 두었습니다. (PHOTO_GRADING_READ_TIMEOUT)
+  public <T> Optional<T> askPhotoGrading(
+      Long userId,
+      GptUsageKind kind,
+      AiQuestion question,
+      String imageDataUrl,
+      Class<T> answerType) {
+    return send(
+        photoGradingRestClient,
+        model,
+        userId,
+        kind,
+        question,
+        imageInput(question, imageDataUrl),
+        answerType);
+  }
+
+  // 질문 글과 사진 한 장을 묶은 입력입니다. (askWithImage · askPhotoGrading)
+  //   보내는 모양: [ { "role": "user", "content": [ { "type": "input_text", "text": "..." },
+  //                   { "type": "input_image", "image_url": "data:...", "detail": "auto" } ] } ]
+  private static List<Map<String, Object>> imageInput(AiQuestion question, String imageDataUrl) {
+    return List.of(
+        Map.of(
+            "role",
+            "user",
+            "content",
+            List.of(
+                Map.of("type", "input_text", "text", question.input()),
+                Map.of("type", "input_image", "image_url", imageDataUrl, "detail", "auto"))));
+  }
+
+  // input 은 글(String)이거나, 사진이 섞인 메시지 목록(askWithImage · askPhotoGrading)입니다.
   // modelName 은 보낼 모델 이름입니다. (보통 model, 자기 분석만 analysisModel)
   private <T> Optional<T> send(
       RestClient client,

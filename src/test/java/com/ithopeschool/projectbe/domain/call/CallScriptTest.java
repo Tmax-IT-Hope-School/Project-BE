@@ -693,7 +693,7 @@ class CallScriptTest {
         .doesNotContain("열 번 안팎")
         .doesNotContain("생각 습관 확인")
         .doesNotEndWith("\n");
-    // 상담 · 과목 쌤 방은 예전 대본 그대로입니다.
+    // 상담 방은 예전 대본 그대로입니다. (방을 안 주면 상담 방)
     assertThat(
             CallScript.chatInstructions(
                 2,
@@ -703,8 +703,80 @@ class CallScriptTest {
                 List.of(),
                 CallScript.SelfReport.NONE,
                 RiskLevel.NONE,
-                ChatRoom.TUTOR))
+                ChatRoom.COACH))
         .isEqualTo(coach);
+  }
+
+  @Test
+  @DisplayName("과목 쌤 방 대본에는 [생각 습관] · [통화 순서] · [지난 통화] 가 없고, 번호 목록까지 쓴다 (2026-10-31)")
+  void tutorChatHasNoBiasRulesNorCallOrderNorPastCalls() {
+    Card card = card(190, 240, "phone", List.of(3, 3));
+    BiasQuestion question = BiasQuestion.pick(false, "phone", null, List.of(), List.of());
+    List<CallScript.PastCall> calls =
+        List.of(
+            past(
+                LocalDate.of(2026, 10, 13),
+                "미적분 이야기를 함.",
+                CognitiveBias.FUTURE_SELF,
+                "만약 학원에서 오면 → 단어 20개",
+                null));
+    CallScript.SelfReport report =
+        new CallScript.SelfReport(
+            List.of(CognitiveBias.PLANNING_FALLACY), List.of(Weakness.GAME), List.of("다름 1"));
+    String tutor =
+        CallScript.chatInstructions(
+            2, 3, card, question, calls, report, RiskLevel.NONE, ChatRoom.TUTOR);
+
+    assertThat(tutor)
+        .contains("한 번에 다섯 문장까지 쓰고, 문제 · 풀이 단계는 번호 목록(1. 2. 3.)으로 써")
+        .contains("[꼭 지킬 것]", "[말투]", "[오늘의 사실]")
+        .contains("청소년상담 1388")
+        .contains("공부와 상관없는 부탁(다른 주제의 긴 이야기)은 짧게 사양하고 공부 질문으로 돌아와")
+        .doesNotContain("[생각 습관]")
+        .doesNotContain("[통화 순서]")
+        .doesNotContain("[지난 통화]")
+        .doesNotContain("미적분 이야기를 함")
+        .doesNotContain("만약 학원에서 오면")
+        .doesNotContain("두세 문장")
+        .doesNotContain("열 번 안팎")
+        .doesNotContain("숙제를 대신 풀기")
+        .doesNotContain("통화 순서로 돌아와")
+        .doesNotEndWith("\n");
+    // 같은 재료로 만든 상담 방 대본에는 세 칸이 그대로 있습니다.
+    assertThat(CallScript.chatInstructions(2, 3, card, question, calls, report))
+        .contains("[생각 습관]", "[통화 순서]", "[지난 통화]", "두세 문장", "숙제를 대신 풀기");
+  }
+
+  @Test
+  @DisplayName("위로하는 날 · 위험한 날의 과목 쌤 방도 [통화 순서] 없이 위로 말투 · [오늘 예측] 은 그대로 둔다")
+  void supportiveTutorKeepsTheComfortTone() {
+    Card card = card(190, 240, "phone", List.of(3, 3));
+    String supportive =
+        CallScript.chatInstructions(
+            0,
+            3,
+            card,
+            null,
+            List.of(),
+            CallScript.SelfReport.NONE,
+            RiskLevel.NONE,
+            ChatRoom.TUTOR);
+    String risky =
+        CallScript.chatInstructions(
+            2,
+            3,
+            card,
+            null,
+            List.of(),
+            CallScript.SelfReport.NONE,
+            RiskLevel.HIGH,
+            ChatRoom.TUTOR);
+
+    assertThat(supportive)
+        .contains("위로하고 응원하는 말만 해")
+        .doesNotContain("[통화 순서]")
+        .doesNotEndWith("\n");
+    assertThat(risky).contains("[오늘 예측]").doesNotContain("[통화 순서]").doesNotEndWith("\n");
   }
 
   @Test
@@ -911,9 +983,24 @@ class CallScriptTest {
     String section = CallScript.topicSection(ChatTopic.QUIZ_WRONG, List.of("문제: lim 1/n"));
 
     assertThat(section)
-        .contains("정답을 바로 말하지 마")
+        .contains("되묻지 말고 먼저 설명해")
         .contains("tags 를 빈 목록으로 둬")
         .doesNotContain("고를 수 있는 이유");
+  }
+
+  @Test
+  @DisplayName("틀린 문제 주제는 되묻기 전에 먼저 설명하고, 질문은 비슷한 문제 하나뿐이다 (과목 쌤 방, 2026-10-31)")
+  void quizWrongTopicExplainsFirst() {
+    String section = CallScript.topicSection(ChatTopic.QUIZ_WRONG, List.of("문제: lim 1/n"));
+
+    assertThat(section)
+        .contains("정답이 왜 맞는지와 학생이 고른 답이 왜 아닌지")
+        .contains("비슷한 문제 하나를 내 줘. 질문은 그 하나뿐이야")
+        .contains("start_quiz")
+        // 예전의 "먼저 묻기" 규칙은 없습니다.
+        .doesNotContain("정답을 바로 말하지 마")
+        .doesNotContain("왜 그 답을 골랐는지 물어")
+        .doesNotContain("학생이 직접 말해 보게 해");
   }
 
   // ---- 음성 통화: 덜 묻고 주제 하나를 깊게 (2026-10-25 #434) ----
