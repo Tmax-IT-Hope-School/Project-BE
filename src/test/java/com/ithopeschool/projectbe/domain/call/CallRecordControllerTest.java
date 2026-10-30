@@ -100,8 +100,8 @@ class CallRecordControllerTest {
         "{\"lines\":[{\"speaker\":\"teacher\",\"text\":\"안녕\"}]}", "speaker 는 ai 또는 me 예요");
     expectRejected("{\"lines\":[{\"speaker\":\"me\"}]}", "한 말(text)을 보내 주세요");
     expectRejected(
-        "{\"lines\":[{\"speaker\":\"me\",\"text\":\"" + "가".repeat(501) + "\"}]}",
-        "자막 한 줄(text)은 500자까지예요");
+        "{\"lines\":[{\"speaker\":\"me\",\"text\":\"" + "가".repeat(1001) + "\"}]}",
+        "자막 한 줄(text)은 1000자까지예요");
     String tooMany =
         "{\"lines\":["
             + String.join(",", Collections.nCopies(201, "{\"speaker\":\"me\",\"text\":\"응\"}"))

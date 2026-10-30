@@ -129,7 +129,34 @@ public class ChatAiClient {
               + " 그 목록에 없는 값은 쓰지 마. 주제가 없거나 이유가 안 보이면 빈 목록.",
           "- 학생이 힘든 마음을 말하면 action 은 none 이고 quickReplies · tags 는 비워.");
 
-  // 계획 방(PLANNER)의 "답 모양" 규칙입니다. 상담 · 과목 쌤 방은 위의 TURN_RULES 그대로입니다. (2026-10-25 #431)
+  // 과목 쌤 방(TUTOR)의 "답 모양" 규칙입니다. (2026-10-31 "질문을 하면 다시 질문으로 돌아와서 시연할 때 문제")
+  // 이 칸은 대본 맨 끝에 붙어 가장 세게 먹힙니다. TURN_RULES 의 "두세 문장" 을 그대로 쓰면 문제 3개 · 풀이 과정을
+  // 한 답에 쓸 수 없어서 "어디까지 배웠어?" 처럼 되묻고 하나씩만 냈습니다. 그래서 과목 쌤은 번호 목록까지 쓰고 먼저 답하게 합니다.
+  // action 은 TURN_RULES 와 같은 행동을 그대로 씁니다. (확인 문제 start_quiz 포함)
+  static final String TUTOR_TURN_RULES =
+      String.join(
+          "\n",
+          "",
+          "",
+          "[답 모양]",
+          "- reply: 학생에게 할 말. 물은 것에 먼저 답해. 답 없이 되묻기만 하지 마."
+              + " 설명은 다섯 문장까지, 문제 · 풀이 단계는 줄을 바꾼 번호 목록(1. 2. 3.)으로 써."
+              + " 문제는 한 답에 5개까지, 풀이는 7단계까지, 전체 700자 안쪽. 질문은 답한 뒤 맨 끝에 하나까지만.",
+          "- quickReplies: 학생이 눌러서 바로 보낼 짧은 답 2~3개. 학생 말투로, 각각 15자 안쪽."
+              + " 예: '풀이 보여 줘' · '하나 더 내 줘' · '이해했어'.",
+          "- action: 학생이 지금 공부를 시작하겠다고 하면 start_timer."
+              + " 목표를 줄이기로 했으면 shrink_today 와 minutes(30~60). 카드 수를 줄이자는 뜻이야."
+              + " 새로 할 일을 정했으면 create_card 와 title(20자 안쪽) · minutes(30~120, 보통 40~60)."
+              + " 10분 · 20분처럼 30분보다 짧은 공부는 권하지 마."
+              + " 시험 · 대회 · 수행평가처럼 무엇을 언제까지 준비한다고 하면 make_plan 과 title(목표 한 줄, 30자 안쪽) ·"
+              + " date(마감 날 YYYY-MM-DD, 모르면 null). 학생이 방금 공부를 끝냈다고 하거나 잘 알았는지 확인해 달라고 하면"
+              + " start_quiz 와 title(공부한 주제, 30자 안쪽). 문제를 reply 에 직접 냈거나 그 밖이면 none."
+              + " date 는 make_plan 에만 써.",
+          "- tags: [이번 대화의 주제] 에 '고를 수 있는 이유' 가 있을 때만, 학생 말에서 보이는 이유 값 0~3개."
+              + " 그 목록에 없는 값은 쓰지 마. 주제가 없거나 이유가 안 보이면 빈 목록.",
+          "- 학생이 힘든 마음을 말하면 action 은 none 이고 quickReplies · tags 는 비워.");
+
+  // 계획 방(PLANNER)의 "답 모양" 규칙입니다. 상담 방은 위의 TURN_RULES 그대로입니다. (2026-10-25 #431)
   // 이 칸은 대본 맨 끝에 붙어 가장 세게 먹혀서, 여기서 "두세 문장" 이라고 하면 계획 방 칸이 뭐라 해도 짧게 답합니다.
   // 그래서 계획 방은 다섯 문장 · 짧은 목록까지 쓰게 하고, 오늘 계획을 부르는 day_plan 을 가장 먼저 적습니다.
   // "오늘 계획 짜 줘" 칩은 앱이 늘 따로 보여 주므로 quickReplies 에 넣지 않게 합니다.
@@ -300,7 +327,9 @@ public class ChatAiClient {
                             "type", "input_image", "image_url", imageDataUrl, "detail", "auto"))));
     // 검색 · 사진은 오래 걸려서 25초까지 기다리는 연결을 씁니다.
     RestClient client = webSearch || imageDataUrl != null ? imageRestClient : restClient;
-    return sendTurn(client, instructions, input, webSearch ? webSearchTools() : null, TURN_RULES);
+    // 과목 쌤의 답 모양(번호 목록 · 먼저 답하기)을 붙입니다. (2026-10-31)
+    return sendTurn(
+        client, instructions, input, webSearch ? webSearchTools() : null, TUTOR_TURN_RULES);
   }
 
   // 계획 방의 답 한 번. turn · turnWithImage 와 같고, 대본 끝에 계획 방의 답 모양(PLANNER_TURN_RULES)을 붙입니다. (#431)
@@ -428,11 +457,12 @@ public class ChatAiClient {
   }
 
   // 받은 글(JSON)을 답 한 번으로 바꿉니다. JSON 이 아니거나 reply 가 없으면 받은 글을 그대로 말로 씁니다. (버튼 없이)
+  // 말은 대화 한 줄의 한도(CallFinishRequest.Line.MAX_TEXT_LENGTH)까지만 씁니다. (fitLine)
   static ChatTurn parseTurn(String text) {
     try {
       RawTurn raw = JSON.readValue(text, RawTurn.class);
       if (raw.reply() == null || raw.reply().isBlank()) {
-        return ChatTurn.textOnly(text);
+        return ChatTurn.textOnly(fitLine(text));
       }
       ChatReplyResponse.Action action =
           raw.action() == null
@@ -444,13 +474,20 @@ public class ChatAiClient {
                   raw.action().date(),
                   raw.action().startTime());
       return new ChatTurn(
-          raw.reply().trim(),
+          fitLine(raw.reply().trim()),
           raw.quickReplies() == null ? List.of() : raw.quickReplies(),
           action,
           raw.tags() == null ? List.of() : raw.tags());
     } catch (JacksonException e) {
-      return ChatTurn.textOnly(text);
+      return ChatTurn.textOnly(fitLine(text));
     }
+  }
+
+  // 학생 기기는 AI 의 말을 다음 말 보내기 · 끝내기 때 대화 줄로 다시 보냅니다. 그 한 줄이 서버 한도를 넘으면
+  // 그다음부터 400 으로 막혀 채팅이 멈춥니다. 그래서 한도까지만 남깁니다. (2026-10-31, 과목 쌤의 문제 목록 · 풀이처럼 긴 답)
+  //   1000자가 넘는 말 → 앞의 1000자 (이모지 한가운데서는 자르지 않음)
+  static String fitLine(String reply) {
+    return CallScript.cutKeepingEmoji(reply, CallFinishRequest.Line.MAX_TEXT_LENGTH);
   }
 
   // GPT 에게 줄 입력 글입니다. 대화를 "코치: … / 학생: …" 한 줄씩으로 적고, 다음 말을 부탁합니다.

@@ -231,9 +231,10 @@ public class CallService {
     // 생각 습관 테스트 결과. 서버에 저장된 것이 있으면 그것을, 없으면 FE 가 보낸 것을 씁니다.
     CallScript.SelfReport selfReport = selfReportOf(userId, request, recentCalls);
 
-    // 계획 방은 생각 습관 질문을 하지 않아서 고르지 않습니다. (#431)
+    // 계획 방 · 과목 쌤 방은 생각 습관 질문을 하지 않아서 고르지 않습니다. (#431, 2026-10-31)
+    // 고르면 묻지도 않은 질문이 "물어본 질문" 으로 통화 기록에 남습니다.
     BiasQuestion biasQuestion =
-        room == ChatRoom.PLANNER
+        room == ChatRoom.PLANNER || room == ChatRoom.TUTOR
             ? null
             : BiasQuestion.pick(
                 CallScript.isSupportive(careLevel, card),
