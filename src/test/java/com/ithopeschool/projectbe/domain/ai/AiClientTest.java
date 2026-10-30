@@ -139,6 +139,28 @@ class AiClientTest {
   }
 
   @Test
+  @DisplayName("사진 채점(askPhotoGrading)도 사진과 함께 같은 모양으로 보내고, 글 모델로 묻는다")
+  void photoGradingSendsTheImageLikeAskWithImage() {
+    String image = "data:image/jpeg;base64,AQID";
+    openAi
+        .expect(requestTo(URL))
+        .andExpect(jsonPath("$.model").value(MODEL))
+        .andExpect(jsonPath("$.input[0].content[0].type").value("input_text"))
+        .andExpect(jsonPath("$.input[0].content[1].type").value("input_image"))
+        .andExpect(jsonPath("$.input[0].content[1].image_url").value(image))
+        .andRespond(withSuccess(answerOf("{\"items\":[\"1번\"]}"), MediaType.APPLICATION_JSON));
+
+    Answer answer =
+        clientWith(KEY, MODEL)
+            .askPhotoGrading(USER_ID, GptUsageKind.ASSIST, QUESTION, image, Answer.class)
+            .orElseThrow();
+
+    assertThat(answer.items()).containsExactly("1번");
+    verify(gptUsageGuard).recordText(USER_ID, GptUsageKind.ASSIST);
+    openAi.verify();
+  }
+
+  @Test
   @DisplayName("답이 JSON 이 아니거나 모양이 다르면 빈 값이다")
   void wrongShapeMeansEmpty() {
     openAi

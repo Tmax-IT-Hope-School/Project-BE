@@ -49,7 +49,7 @@ class AnswerGradingTest {
   }
 
   @Test
-  @DisplayName("O · X 표시는 넓게 받는다: 동그라미 쪽 글자는 O, 가위표 · 빗금 쪽 글자는 X, 세모 · 체크는 못 읽음")
+  @DisplayName("O · X 표시는 넓게 받는다: 동그라미 쪽 글자는 O, 가위표 · 빗금 · 체크(V) 쪽 글자는 X, 세모는 못 읽음")
   void marksAreReadBroadly() {
     for (String mark : List.of("O", "o", " O ", "○", "◯", "⭕", "〇", "0", "동그라미")) {
       assertThat(AnswerGrading.markOf(mark)).as(mark).isEqualTo(MarkRead.O);
@@ -57,7 +57,11 @@ class AnswerGradingTest {
     for (String mark : List.of("X", "x", "×", "✕", "✗", "❌", "/", "\\", "빗금")) {
       assertThat(AnswerGrading.markOf(mark)).as(mark).isEqualTo(MarkRead.X);
     }
-    for (String mark : List.of("△", "✓", "V", "", "  ")) {
+    // 한국 채점에서는 틀린 문제에 V 를 많이 긋습니다. (2026-10-31 시연 시험지: V 5개 = 틀림 5개)
+    for (String mark : List.of("V", "v", " V ", "✓", "✔", "√", "체크")) {
+      assertThat(AnswerGrading.markOf(mark)).as(mark).isEqualTo(MarkRead.X);
+    }
+    for (String mark : List.of("△", "☆", "", "  ")) {
       assertThat(AnswerGrading.markOf(mark)).as(mark).isNull();
     }
     assertThat(AnswerGrading.markOf(null)).isNull();
@@ -119,6 +123,9 @@ class AnswerGradingTest {
     assertThat(marked.instructions()).contains("O · X 표시가 없는 문제도 빼지 말고 items 에 넣어");
     // O · X 를 넓게 읽고, 흐리다고 null 로 하지 않게 합니다. (2026-10-27)
     assertThat(marked.instructions()).contains("넓게 O", "넓게 X", "흐리거나 작다고 null 로 하지 마");
+    // V(체크)는 틀림이고, OX 문제에서 학생이 답으로 쓴 O · X 는 채점 표시가 아닙니다. (2026-10-31)
+    assertThat(marked.instructions()).contains("체크(✓) · V 모양", "학생의 답이지 채점 표시가 아니야");
+    assertThat(marked.instructions()).doesNotContain("세모 · 체크(✓) · 별표처럼");
     assertThat(marked.input()).contains("채점함");
     assertThat(unmarked.input()).contains("채점하지 않음");
     assertThat(marked.schema()).containsKey("properties");
