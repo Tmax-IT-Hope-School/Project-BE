@@ -22,6 +22,8 @@ import org.springframework.stereotype.Component;
 // 방(ChatRoom)도 같이 기억합니다. 사진이 붙은 말에 방마다 다른 규칙을 붙이려고 씁니다. 잊으면 코치입니다.
 // 과목 쌤 방은 그 학생의 교육과정(CurriculumContext — 학년 · 교육과정 버전 · 오늘 과목)도 기억합니다.
 // 말마다 질문에 맞는 성취기준을 고르려고 씁니다. 잊으면 성취기준 칸을 붙이지 않습니다. (2026-10-18)
+// [＋ 새 대화] 로 연 채팅인지(fresh)도 기억합니다. 새 대화면 말 보내기에서 다른 방 이야기를 붙이지 않습니다. (2026-10-31)
+// 잊으면 새 대화가 아닌 것으로 봅니다. (대본을 잊으면 어차피 409 라서 그 채팅으로는 더 이야기하지 않습니다)
 @Component
 @RequiredArgsConstructor
 public class ChatScriptStore {
@@ -40,6 +42,7 @@ public class ChatScriptStore {
       ChatTopic topic,
       ChatRoom room,
       CurriculumContext curriculum,
+      boolean fresh,
       Instant savedAt) {}
 
   private final Map<Long, Saved> savedByChatId = new HashMap<>();
@@ -60,11 +63,23 @@ public class ChatScriptStore {
       ChatTopic topic,
       ChatRoom room,
       CurriculumContext curriculum) {
+    save(chatId, userId, instructions, topic, room, curriculum, false);
+  }
+
+  // 위와 같고, [＋ 새 대화] 로 연 채팅인지(fresh)도 기억합니다. (2026-10-31)
+  public synchronized void save(
+      Long chatId,
+      Long userId,
+      String instructions,
+      ChatTopic topic,
+      ChatRoom room,
+      CurriculumContext curriculum,
+      boolean fresh) {
     if (!savedByChatId.containsKey(chatId) && savedByChatId.size() >= MAX_SIZE) {
       savedByChatId.clear();
     }
     savedByChatId.put(
-        chatId, new Saved(userId, instructions, topic, room, curriculum, clock.instant()));
+        chatId, new Saved(userId, instructions, topic, room, curriculum, fresh, clock.instant()));
   }
 
   // 코치 방으로 연 채팅 (방을 따로 고르지 않은 채팅)
@@ -72,7 +87,7 @@ public class ChatScriptStore {
     save(chatId, userId, instructions, topic, ChatRoom.COACH);
   }
 
-  // 대본만 바꿔 기억합니다. 같은 사람의 같은 채팅에 기억해 둔 주제 · 방 · 교육과정이 있으면 그대로 둡니다.
+  // 대본만 바꿔 기억합니다. 같은 사람의 같은 채팅에 기억해 둔 주제 · 방 · 교육과정 · 새 대화 표시가 있으면 그대로 둡니다.
   // (위기 표현 뒤 대본에 한 칸을 덧붙일 때 씁니다. ChatService.replyToCrisis)
   public synchronized void save(Long chatId, Long userId, String instructions) {
     Saved before = savedByChatId.get(chatId);
@@ -83,7 +98,8 @@ public class ChatScriptStore {
         instructions,
         same ? before.topic() : null,
         same ? before.room() : ChatRoom.COACH,
-        same ? before.curriculum() : null);
+        same ? before.curriculum() : null,
+        same && before.fresh());
   }
 
   // 그 사람의 그 채팅 대본. 없거나, 남의 채팅이거나, 2시간이 지났으면 비어 있습니다.
@@ -104,6 +120,11 @@ public class ChatScriptStore {
   // 그 사람의 그 채팅 교육과정. 과목 쌤 방이 아니거나, 학년을 몰랐거나, 대본을 잊었으면 비어 있습니다.
   public synchronized Optional<CurriculumContext> findCurriculum(Long chatId, Long userId) {
     return findSaved(chatId, userId).map(Saved::curriculum);
+  }
+
+  // 그 사람의 그 채팅이 [＋ 새 대화] 로 연 채팅인지. 대본을 잊었거나 남의 채팅이면 false 입니다.
+  public synchronized boolean isFresh(Long chatId, Long userId) {
+    return findSaved(chatId, userId).map(Saved::fresh).orElse(false);
   }
 
   // 기억해 둔 것 하나. 없거나, 남의 채팅이거나, 2시간이 지났으면 비어 있습니다. (지난 것은 지웁니다)
