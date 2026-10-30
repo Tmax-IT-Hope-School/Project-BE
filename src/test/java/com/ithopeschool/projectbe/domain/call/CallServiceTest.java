@@ -757,6 +757,24 @@ class CallServiceTest {
   }
 
   @Test
+  @DisplayName("과목 쌤 방 채팅 대본은 [생각 습관] · [통화 순서] 가 없고 생각 습관 질문도 고르지 않는다 (2026-10-31)")
+  void tutorChatScriptHasNoBiasQuestion() {
+    CallService.Script coach =
+        callService.prepareChatScript(USER_ID, REQUEST, NOW, TODAY, ChatRoom.COACH);
+    CallService.Script tutor =
+        callService.prepareChatScript(USER_ID, REQUEST, NOW, TODAY, ChatRoom.TUTOR);
+
+    // 같은 날 상담 방은 생각 습관 질문을 고릅니다. 과목 쌤 방은 묻지 않으니 고르지 않습니다.
+    assertThat(coach.biasQuestion()).isNotNull();
+    assertThat(tutor.biasQuestion()).isNull();
+    assertThat(tutor.instructions())
+        .contains("글로 이야기하는 공부 코치", "번호 목록")
+        .doesNotContain("[생각 습관]")
+        .doesNotContain("[통화 순서]")
+        .doesNotContain("두세 문장");
+  }
+
+  @Test
   @DisplayName("계획 방 채팅 대본은 [생각 습관] · [통화 순서] 가 없고 생각 습관 질문도 고르지 않는다 (#431)")
   void plannerChatScriptHasNoBiasQuestion() {
     CallService.Script coach =
@@ -777,24 +795,6 @@ class CallServiceTest {
             callService
                 .prepareScript(USER_ID, REQUEST, NOW, TODAY, CallChannel.CHAT)
                 .instructions());
-  }
-
-  @Test
-  @DisplayName("과목 쌤 방 채팅 대본은 [생각 습관] · [통화 순서] 가 없고 생각 습관 질문도 고르지 않는다 (2026-10-31)")
-  void tutorChatScriptHasNoBiasQuestion() {
-    CallService.Script coach =
-        callService.prepareChatScript(USER_ID, REQUEST, NOW, TODAY, ChatRoom.COACH);
-    CallService.Script tutor =
-        callService.prepareChatScript(USER_ID, REQUEST, NOW, TODAY, ChatRoom.TUTOR);
-
-    // 같은 날 상담 방은 생각 습관 질문을 고릅니다. 과목 쌤 방은 묻지 않으니 고르지 않습니다.
-    assertThat(coach.biasQuestion()).isNotNull();
-    assertThat(tutor.biasQuestion()).isNull();
-    assertThat(tutor.instructions())
-        .contains("글로 이야기하는 공부 코치", "번호 목록")
-        .doesNotContain("[생각 습관]")
-        .doesNotContain("[통화 순서]")
-        .doesNotContain("두세 문장");
   }
 
   @Test
