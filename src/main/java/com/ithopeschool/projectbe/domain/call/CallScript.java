@@ -234,7 +234,11 @@ public final class CallScript {
   //   - 둘째 줄의 "두세 문장 · 열 번 안팎" 대신 "다섯 문장까지 또는 짧은 목록 3~5줄"
   //   - [생각 습관] · [통화 순서] 칸을 넣지 않습니다. 계획 방의 순서는 [이번 방: 계획] 칸(ChatRoom.section)이 정합니다.
   //     ("계속 물어봐서 깊게 대화가 안 됨" — 계획 방에도 생각 습관 질문 · 통화 순서의 질문이 그대로 들어가 있었습니다)
-  // 상담 · 과목 쌤 방은 지금과 똑같습니다.
+  // 과목 쌤 방(TUTOR)도 같은 방법으로 바꿉니다. (2026-10-31 "질문을 하면 다시 질문으로 돌아와서")
+  //   - 둘째 줄: "다섯 문장까지, 문제 · 풀이 단계는 번호 목록" (문제 3개 · 풀이 과정을 한 답에 쓰게)
+  //   - [생각 습관] · [통화 순서] · [지난 통화] 칸을 넣지 않습니다. 지난 통화를 넣으면 예전 이야기를 다시 꺼냅니다.
+  //   - [꼭 지킬 것] 의 "숙제를 대신 풀기는 사양" 대신 "공부와 상관없는 부탁만 사양". 과목 쌤은 풀이를 보여 주는 방입니다.
+  // 상담 방은 지금과 똑같습니다.
   public static String chatInstructions(
       int careLevel,
       int maxHarshness,
@@ -279,6 +283,7 @@ public final class CallScript {
       VoiceCall voice) {
     boolean supportive = isSupportive(careLevel, card);
     boolean planner = room == ChatRoom.PLANNER;
+    boolean tutor = room == ChatRoom.TUTOR;
     boolean isVoice = channel == CallChannel.VOICE;
     // 음성 통화의 오늘 주제. 채팅은 주제를 고르지 않습니다(null).
     CallTopic topic =
@@ -288,6 +293,11 @@ public final class CallScript {
       lines.add("너는 고등학생과 하루에 한 번 글로 이야기하는 공부 코치야. 한국어 반말로 써.");
       if (planner) {
         lines.add("한 번에 다섯 문장까지, 또는 짧은 목록 3~5줄로 쓰고, 학생이 답할 때까지 기다려. 아래에서 '통화' 는 이 채팅을 뜻해.");
+      } else if (tutor) {
+        // 과목 쌤은 문제 몇 개 · 풀이 단계를 한 답에 다 써야 해서 목록을 길게 써도 됩니다.
+        lines.add(
+            "한 번에 다섯 문장까지 쓰고, 문제 · 풀이 단계는 번호 목록(1. 2. 3.)으로 써. 학생이 답할 때까지 기다려."
+                + " 아래에서 '통화' 는 이 채팅을 뜻해.");
       } else {
         lines.add("한 번에 두세 문장만 쓰고, 학생이 답할 때까지 기다려. 아래에서 '통화' 는 이 채팅을 뜻해." + " 열 번 안팎으로 주고받고 마무리해.");
       }
@@ -306,10 +316,15 @@ public final class CallScript {
         "- 학생이 죽고 싶다, 사라지고 싶다, 자기를 해치고 싶다는 말을 하면 공부 이야기를 바로 멈춰."
             + " 꾸짖거나 가볍게 넘기지 말고 먼저 들어 줘. 그리고 믿을 수 있는 어른에게 꼭 이야기하고,"
             + " 청소년상담 1388(24시간 · 무료 · 비밀 보장)에 바로 이야기할 수 있다고 알려 줘.");
-    lines.add(
-        "- 공부와 상관없는 부탁(숙제를 대신 풀기, 다른 주제의 긴 이야기)은 짧게 사양하고 "
-            + (isVoice ? "오늘 주제로" : "통화 순서로")
-            + " 돌아와.");
+    if (tutor) {
+      // 과목 쌤은 숙제 · 문제 풀이를 보여 주는 방이라 "숙제를 대신 풀기" 는 사양할 부탁이 아닙니다. (2026-10-31)
+      lines.add("- 공부와 상관없는 부탁(다른 주제의 긴 이야기)은 짧게 사양하고 공부 질문으로 돌아와.");
+    } else {
+      lines.add(
+          "- 공부와 상관없는 부탁(숙제를 대신 풀기, 다른 주제의 긴 이야기)은 짧게 사양하고 "
+              + (isVoice ? "오늘 주제로" : "통화 순서로")
+              + " 돌아와.");
+    }
     lines.add("- 네가 AI 라는 것을 숨기지 마. 사람인 척하지 마.");
     lines.add("");
     lines.add("[말투]");
@@ -326,14 +341,16 @@ public final class CallScript {
       lines.add("");
     }
     // 위로하는 통화에서는 지난 통화의 못 한 일·생각 습관을 꺼내지 않습니다. 힘든 날에 캐물으면 자책으로 이어질 수 있어서입니다.
-    if (!supportive && !pastCalls.isEmpty()) {
+    // 과목 쌤 방도 넣지 않습니다. 지난 이야기를 끌고 와서 지금 물은 것에 바로 답하지 않게 됩니다. (2026-10-31)
+    if (!supportive && !tutor && !pastCalls.isEmpty()) {
       lines.add("[지난 통화]");
       lines.addAll(pastCallLines(pastCalls));
       lines.add("");
     }
     // 계획 방에는 생각 습관 질문을 넣지 않습니다. 계획을 짜는 중에 생각 습관을 캐물으면 되묻기만 늘어납니다. (#431)
+    // 과목 쌤 방도 같은 이유로 넣지 않습니다. (2026-10-31)
     // 음성 통화는 오늘 주제가 생각 습관일 때만 넣습니다. 다른 주제인 날에 신호 단어마다 질문하면 주제가 흩어집니다. (#434)
-    boolean withBiasRules = isVoice ? topic.usesBiasQuestion() : !supportive && !planner;
+    boolean withBiasRules = isVoice ? topic.usesBiasQuestion() : !supportive && !planner && !tutor;
     if (withBiasRules) {
       lines.add("[생각 습관]");
       lines.addAll(biasRules());
@@ -348,9 +365,9 @@ public final class CallScript {
       }
       lines.add("");
     }
-    // 계획 방은 [통화 순서] 를 넣지 않습니다. 순서는 [이번 방: 계획] 칸이 정합니다. (#431)
+    // 계획 방 · 과목 쌤 방은 [통화 순서] 를 넣지 않습니다. 순서는 [이번 방] 칸(ChatRoom.section)이 정합니다. (#431, 2026-10-31)
     // 위의 칸들은 모두 빈 줄로 끝나므로, 그 마지막 빈 줄을 지우고 돌려줍니다.
-    if (planner) {
+    if (planner || tutor) {
       lines.remove(lines.size() - 1);
       return String.join("\n", lines);
     }

@@ -383,6 +383,38 @@ class ChatAiClientTest {
   }
 
   @Test
+  @DisplayName("과목 쌤(turnForTutor)은 대본 끝에 과목 쌤의 답 모양(먼저 답하기 · 번호 목록)을 붙인다 (2026-10-31)")
+  void tutorTurnUsesTutorRules() {
+    openAi
+        .expect(requestTo(URL))
+        .andExpect(jsonPath("$.instructions").value("과목 쌤 대본" + ChatAiClient.TUTOR_TURN_RULES))
+        .andExpect(jsonPath("$.text.format.type").value("json_schema"))
+        .andRespond(withSuccess(PLAIN_ANSWER, MediaType.APPLICATION_JSON));
+
+    assertThat(clientWith(KEY, MODEL).turnForTutor("과목 쌤 대본", TALK, null, false)).isPresent();
+    openAi.verify();
+  }
+
+  @Test
+  @DisplayName("과목 쌤의 답 모양은 두세 문장 제한 없이 먼저 답하고 번호 목록까지 쓴다. 상담 · 계획 방의 답 모양은 그대로")
+  void tutorRulesDifferFromTheOthers() {
+    assertThat(ChatAiClient.TUTOR_TURN_RULES)
+        .startsWith("\n\n[답 모양]")
+        .contains("물은 것에 먼저 답해. 답 없이 되묻기만 하지 마")
+        .contains("번호 목록(1. 2. 3.)")
+        .contains("문제는 한 답에 5개까지")
+        .contains("질문은 답한 뒤 맨 끝에 하나까지만")
+        // 확인 문제(start_quiz)는 그대로 씁니다.
+        .contains("start_quiz 와 title(공부한 주제, 30자 안쪽)")
+        .contains("문제를 reply 에 직접 냈거나 그 밖이면 none")
+        .contains("학생이 힘든 마음을 말하면 action 은 none")
+        .doesNotContain("두세 문장")
+        .doesNotContain("day_plan");
+    assertThat(ChatAiClient.TURN_RULES).contains("reply: 학생에게 할 말. 두세 문장.");
+    assertThat(ChatAiClient.PLANNER_TURN_RULES).doesNotContain("번호 목록");
+  }
+
+  @Test
   @DisplayName("검색 도구를 붙인 요청이 4xx 로 거절되면 도구 없이 한 번 더 보낸다 (키 · 대화는 로그에 없음)")
   void tutorRetriesWithoutToolsOn4xx(CapturedOutput output) {
     openAi
