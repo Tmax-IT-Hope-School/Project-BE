@@ -457,11 +457,12 @@ public class ChatAiClient {
   }
 
   // 받은 글(JSON)을 답 한 번으로 바꿉니다. JSON 이 아니거나 reply 가 없으면 받은 글을 그대로 말로 씁니다. (버튼 없이)
+  // 말은 대화 한 줄의 한도(CallFinishRequest.Line.MAX_TEXT_LENGTH)까지만 씁니다. (fitLine)
   static ChatTurn parseTurn(String text) {
     try {
       RawTurn raw = JSON.readValue(text, RawTurn.class);
       if (raw.reply() == null || raw.reply().isBlank()) {
-        return ChatTurn.textOnly(text);
+        return ChatTurn.textOnly(fitLine(text));
       }
       ChatReplyResponse.Action action =
           raw.action() == null
@@ -473,13 +474,20 @@ public class ChatAiClient {
                   raw.action().date(),
                   raw.action().startTime());
       return new ChatTurn(
-          raw.reply().trim(),
+          fitLine(raw.reply().trim()),
           raw.quickReplies() == null ? List.of() : raw.quickReplies(),
           action,
           raw.tags() == null ? List.of() : raw.tags());
     } catch (JacksonException e) {
-      return ChatTurn.textOnly(text);
+      return ChatTurn.textOnly(fitLine(text));
     }
+  }
+
+  // 학생 기기는 AI 의 말을 다음 말 보내기 · 끝내기 때 대화 줄로 다시 보냅니다. 그 한 줄이 서버 한도를 넘으면
+  // 그다음부터 400 으로 막혀 채팅이 멈춥니다. 그래서 한도까지만 남깁니다. (2026-10-31, 과목 쌤의 문제 목록 · 풀이처럼 긴 답)
+  //   1000자가 넘는 말 → 앞의 1000자 (이모지 한가운데서는 자르지 않음)
+  static String fitLine(String reply) {
+    return CallScript.cutKeepingEmoji(reply, CallFinishRequest.Line.MAX_TEXT_LENGTH);
   }
 
   // GPT 에게 줄 입력 글입니다. 대화를 "코치: … / 학생: …" 한 줄씩으로 적고, 다음 말을 부탁합니다.

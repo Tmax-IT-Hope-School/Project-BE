@@ -179,6 +179,24 @@ class ChatControllerTest {
   }
 
   @Test
+  @DisplayName("AI 의 긴 말(과목 쌤의 문제 목록 · 풀이)도 1000자까지는 다시 보낼 수 있고, 1001자면 400 이다 (2026-10-31)")
+  void acceptsLongAiLineUpTo1000() throws Exception {
+    given(chatService.send(eq(12L), any())).willReturn(ChatReplyResponse.of(12L, "다 맞았어!"));
+    String me = "{\"speaker\":\"me\",\"text\":\"1번 무단 통치\"}";
+
+    postJson(
+            "/api/v1/chats/12/messages",
+            "{\"lines\":[{\"speaker\":\"ai\",\"text\":\"" + "가".repeat(1000) + "\"}," + me + "]}")
+        .andExpect(status().isOk());
+    postJson(
+            "/api/v1/chats/12/messages",
+            "{\"lines\":[{\"speaker\":\"ai\",\"text\":\"" + "가".repeat(1001) + "\"}," + me + "]}")
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.error.message").value("자막 한 줄(text)은 1000자까지예요"));
+    verify(chatService).send(eq(12L), any());
+  }
+
+  @Test
   @DisplayName("말 보내기에 사진(image)을 붙일 수 있고, 5,600,000자를 넘으면 400 이다")
   void sendsImage() throws Exception {
     given(chatService.send(eq(12L), any())).willReturn(ChatReplyResponse.of(12L, "어디까지 풀었어?"));

@@ -415,6 +415,23 @@ class ChatAiClientTest {
   }
 
   @Test
+  @DisplayName("AI 의 말은 대화 한 줄의 한도(1000자)까지만 쓴다. 학생 기기가 다시 보낼 때 400 으로 막히지 않게 (2026-10-31)")
+  void parseTurnFitsTheLineLimit() {
+    String longReply = "가".repeat(1200);
+    String json =
+        "{\"reply\":\"" + longReply + "\",\"quickReplies\":[],\"action\":null,\"tags\":[]}";
+
+    assertThat(ChatAiClient.parseTurn(json).reply()).hasSize(1000);
+    // JSON 이 아니어서 글 그대로 쓰는 답도 같습니다.
+    assertThat(ChatAiClient.parseTurn(longReply).reply()).hasSize(1000);
+    // 짧은 답은 그대로입니다.
+    assertThat(ChatAiClient.parseTurn("{\"reply\":\"좋아\",\"quickReplies\":[]}").reply())
+        .isEqualTo("좋아");
+    // 이모지 한가운데서 자르지 않습니다.
+    assertThat(ChatAiClient.fitLine("가".repeat(999) + "😀")).isEqualTo("가".repeat(999));
+  }
+
+  @Test
   @DisplayName("검색 도구를 붙인 요청이 4xx 로 거절되면 도구 없이 한 번 더 보낸다 (키 · 대화는 로그에 없음)")
   void tutorRetriesWithoutToolsOn4xx(CapturedOutput output) {
     openAi
