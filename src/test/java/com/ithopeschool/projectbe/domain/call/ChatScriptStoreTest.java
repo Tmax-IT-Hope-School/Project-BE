@@ -92,4 +92,20 @@ class ChatScriptStoreTest {
     assertThat(store.findRoom(13L, 7L)).contains(ChatRoom.COACH);
     assertThat(store.findRoom(14L, 7L)).isEmpty();
   }
+
+  @Test
+  @DisplayName("[＋ 새 대화] 표시를 기억하고, 대본만 바꿔도 그대로다. 안 주거나 · 남의 번호거나 · 잊었으면 false (2026-10-31)")
+  void remembersFresh() {
+    store.save(12L, 7L, "대본", null, ChatRoom.COACH, null, true);
+    store.save(12L, 7L, "대본 + 위기 칸");
+    store.save(13L, 7L, "보통 대본", null, ChatRoom.COACH);
+
+    assertThat(store.isFresh(12L, 7L)).isTrue();
+    assertThat(store.isFresh(13L, 7L)).isFalse();
+    assertThat(store.isFresh(12L, 8L)).isFalse();
+    assertThat(store.isFresh(14L, 7L)).isFalse();
+
+    clock.now = NOW.plus(ChatScriptStore.KEEP).plusSeconds(1);
+    assertThat(store.isFresh(12L, 7L)).isFalse();
+  }
 }

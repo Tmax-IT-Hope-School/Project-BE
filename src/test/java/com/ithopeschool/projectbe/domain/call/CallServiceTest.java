@@ -780,6 +780,45 @@ class CallServiceTest {
   }
 
   @Test
+  @DisplayName("[＋ 새 대화] 로 연 채팅(fresh) 대본에는 [지난 통화] 와 지난 약속을 묻는 순서가 없고, 나머지는 그대로다 (2026-10-31)")
+  void freshChatScriptHasNoPastCalls() {
+    givenPastCalls(
+        pastCall(
+            TODAY.minusDays(1),
+            null,
+            CognitiveBias.FUTURE_SELF,
+            "폰 때문에 못 채웠다고 함.",
+            "학원에서 오면",
+            "영어 단어 20개"));
+    CallSessionRequest fresh =
+        new CallSessionRequest(
+            2, 3, REQUEST.card(), null, null, null, null, null, null, Boolean.TRUE);
+
+    CallService.Script freshScript =
+        callService.prepareChatScript(USER_ID, fresh, NOW, TODAY, ChatRoom.COACH);
+    CallService.Script usual =
+        callService.prepareChatScript(USER_ID, REQUEST, NOW, TODAY, ChatRoom.COACH);
+
+    assertThat(freshScript.instructions())
+        .doesNotContain("[지난 통화]", "폰 때문에 못 채웠다고 함.", "지난 통화에서 정한 약속")
+        // [오늘의 사실] · [통화 순서] 는 그대로 있습니다.
+        .contains("[오늘의 사실]", "[통화 순서]");
+    // 새 대화가 아니면(날이 바뀌어 저절로 연 채팅 등) 지금처럼 지난 통화를 이어 갑니다.
+    assertThat(usual.instructions())
+        .contains("[지난 통화]", "폰 때문에 못 채웠다고 함.")
+        .contains("지난 통화에서 정한 약속 '만약 학원에서 오면 → 영어 단어 20개' 을 지켰는지 물어봐");
+    // fresh 가 false 여도 예전과 같습니다.
+    CallSessionRequest notFresh =
+        new CallSessionRequest(
+            2, 3, REQUEST.card(), null, null, null, null, null, null, Boolean.FALSE);
+    assertThat(
+            callService
+                .prepareChatScript(USER_ID, notFresh, NOW, TODAY, ChatRoom.COACH)
+                .instructions())
+        .isEqualTo(usual.instructions());
+  }
+
+  @Test
   @DisplayName("위험한 날이 아니면 [오늘 예측] 을 적지 않는다")
   void normalDayHasNoRiskSection() {
     callService.startSession(REQUEST);

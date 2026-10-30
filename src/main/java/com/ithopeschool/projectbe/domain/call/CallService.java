@@ -185,18 +185,21 @@ public class CallService {
       LocalDate today,
       CallChannel channel,
       CheckCall.Studied studied) {
-    return prepareScript(userId, request, now, today, channel, studied, null);
+    return prepareScript(userId, request, now, today, channel, studied, null, false);
   }
 
   // 상담 채팅(ChatService)의 대본입니다. 방(room)에 따라 대본이 조금 달라집니다. (2026-10-25 #431)
   // 계획 방(PLANNER)이면 [생각 습관] · [통화 순서] 를 넣지 않고(CallScript.chatInstructions),
   // 생각 습관 질문도 고르지 않습니다(biasQuestion 은 null). 묻지 않은 질문이 "물어본 질문" 으로 기록에 남지 않게 하려는 것입니다.
+  // [＋ 새 대화] 로 연 채팅(request.fresh)이면 [지난 통화] 를 넣지 않습니다. (2026-10-31, 아래 prepareScript)
   Script prepareChatScript(
       Long userId, CallSessionRequest request, Instant now, LocalDate today, ChatRoom room) {
-    return prepareScript(userId, request, now, today, CallChannel.CHAT, null, room);
+    return prepareScript(
+        userId, request, now, today, CallChannel.CHAT, null, room, request.startsFresh());
   }
 
   // room 은 상담 채팅의 방입니다. 음성 통화 · 방을 모르는 채팅은 null 이고, 그러면 상담 방과 같습니다.
+  // fresh 는 학생이 [＋ 새 대화] 를 눌러 연 채팅인지입니다. (상담 채팅만, 음성 통화는 늘 false)
   private Script prepareScript(
       Long userId,
       CallSessionRequest request,
@@ -204,7 +207,8 @@ public class CallService {
       LocalDate today,
       CallChannel channel,
       CheckCall.Studied studied,
-      ChatRoom room) {
+      ChatRoom room,
+      boolean fresh) {
     // 최근 2주의 내 통화 기록 (최근 것이 앞)
     List<CallRecord> recentCalls =
         callRecordRepository.findByUserIdAndCallDateGreaterThanEqualOrderByStartedAtDescIdDesc(
@@ -240,7 +244,11 @@ public class CallService {
                 selfReport.biases());
     // 오늘이 무너지기 쉬운 날이면 대본에 "표시" 로 넘깁니다. 이유(수면 등)는 넘기지 않고 위험 정도만 넘깁니다.
     RiskLevel riskLevel = riskService.levelOn(userId, today);
-    List<CallScript.PastCall> pastCalls = pastCallsOf(recentCalls);
+    // [＋ 새 대화] 로 연 채팅은 지난 통화 · 채팅의 요약을 넣지 않습니다. (2026-10-31)
+    // "새 대화 눌러도 이전 걸 계속 참고하고 이어져서" — 방금 정리한 대화의 요약이 [지난 통화] 로 들어가 이어졌습니다.
+    // 빈 목록이면 [지난 통화] 칸과 지난 약속을 묻는 순서가 같이 빠집니다. (CallScript.build)
+    // 최근 통화 기록은 안전 브레이크 · 생각 습관 질문 고르기에는 그대로 씁니다. (안전이 먼저, CLAUDE.md 4장)
+    List<CallScript.PastCall> pastCalls = fresh ? List.of() : pastCallsOf(recentCalls);
     boolean supportive = CallScript.isSupportive(careLevel, card);
     String instructions;
     if (channel == CallChannel.CHAT) {

@@ -331,6 +331,58 @@ class ChatServiceTest {
   }
 
   @Test
+  @DisplayName("[＋ 새 대화] 로 연 채팅(fresh)은 그 표시를 대본 만들기에 넘기고 기억해서, 다른 방 이야기를 보내도 붙이지 않는다 (2026-10-31)")
+  void freshChatIgnoresOtherRooms() {
+    // 새 대화가 아닌 채팅은 새 대화 표시가 없습니다.
+    service.start(START, null, null, false);
+    assertThat(chatScriptStore.isFresh(CHAT_ID, USER_ID)).isFalse();
+
+    CallSessionRequest fresh =
+        new CallSessionRequest(2, 3, null, null, null, null, null, null, null, Boolean.TRUE);
+    service.start(fresh, null, null, false);
+
+    // 대본 만들기(CallService)에 새 대화 표시가 그대로 갑니다. ([지난 통화] 빼기는 CallServiceTest 가 확인)
+    ArgumentCaptor<CallSessionRequest> sent = ArgumentCaptor.forClass(CallSessionRequest.class);
+    verify(callService, times(2))
+        .prepareChatScript(eq(USER_ID), sent.capture(), eq(NOW), eq(TODAY), any());
+    assertThat(sent.getAllValues().get(1).startsFresh()).isTrue();
+    assertThat(chatScriptStore.isFresh(CHAT_ID, USER_ID)).isTrue();
+
+    // 말 보내기: FE 가 다른 방 이야기를 보내도 이 채팅에는 붙이지 않습니다.
+    CallRecord chat = new CallRecord(USER_ID, TODAY, NOW, null, CallChannel.CHAT);
+    ReflectionTestUtils.setField(chat, "id", CHAT_ID);
+    given(callRecordRepository.findByIdAndUserId(CHAT_ID, USER_ID)).willReturn(Optional.of(chat));
+    ChatMessageRequest request =
+        new ChatMessageRequest(said("오늘 계획 짜 줘").lines(), null, List.of("상담: 미적분 극한이 헷갈려"));
+    given(chatAiClient.turn(alreadySaid(SCRIPT, request), request.lines()))
+        .willReturn(Optional.of(ChatAiClient.ChatTurn.textOnly("좋아, 오늘은 뭐부터 할까?")));
+
+    ChatReplyResponse response = service.send(CHAT_ID, request);
+
+    assertThat(response.reply()).isEqualTo("좋아, 오늘은 뭐부터 할까?");
+    ArgumentCaptor<String> instructions = ArgumentCaptor.forClass(String.class);
+    verify(chatAiClient).turn(instructions.capture(), eq(request.lines()));
+    assertThat(instructions.getValue()).doesNotContain("[다른 방에서 오늘 한 이야기]", "미적분 극한");
+  }
+
+  @Test
+  @DisplayName("[＋ 새 대화] 로 연 채팅은 위기 표현 뒤 대본을 바꿔도 새 대화 표시가 남는다")
+  void freshChatStaysFreshAfterCrisis() {
+    CallSessionRequest fresh =
+        new CallSessionRequest(2, 3, null, null, null, null, null, null, null, Boolean.TRUE);
+    service.start(fresh, null, null, false);
+    CallRecord chat = new CallRecord(USER_ID, TODAY, NOW, null, CallChannel.CHAT);
+    ReflectionTestUtils.setField(chat, "id", CHAT_ID);
+    given(callRecordRepository.findByIdAndUserId(CHAT_ID, USER_ID)).willReturn(Optional.of(chat));
+
+    service.send(CHAT_ID, said("그냥 다 그만두고 죽고 싶어"));
+
+    assertThat(chatScriptStore.find(CHAT_ID, USER_ID))
+        .contains(SCRIPT + ChatService.CRISIS_FOLLOW_UP);
+    assertThat(chatScriptStore.isFresh(CHAT_ID, USER_ID)).isTrue();
+  }
+
+  @Test
   @DisplayName("학생의 말에 위기 표현이 있으면 GPT 를 부르지 않고 도움 안내로 답하고, 채팅은 끝내지 않는다")
   void crisisKeepsTheChatOpen() {
     CallRecord chat = givenOpenChat();

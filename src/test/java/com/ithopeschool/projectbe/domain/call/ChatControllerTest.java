@@ -1,20 +1,24 @@
 package com.ithopeschool.projectbe.domain.call;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.ithopeschool.projectbe.domain.call.dto.CallSessionRequest;
 import com.ithopeschool.projectbe.domain.call.dto.ChatReplyResponse;
 import java.util.Collections;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.http.MediaType;
@@ -176,6 +180,35 @@ class ChatControllerTest {
         .andExpect(status().isOk());
     postJson("/api/v1/chats", "{\"careLevel\":2,\"maxHarshness\":3,\"room\":\"FRIEND\"}")
         .andExpect(status().isBadRequest());
+  }
+
+  @Test
+  @DisplayName("새 대화(fresh: true)로 열면 그 표시를 로직에 넘기고, 안 보내면 새 대화가 아니다 (2026-10-31)")
+  void startsFresh() throws Exception {
+    given(chatService.start(any(), any(), any(), anyBoolean()))
+        .willReturn(ChatReplyResponse.opened(12L));
+
+    postJson("/api/v1/chats?greet=false", "{\"careLevel\":2,\"maxHarshness\":3,\"fresh\":true}")
+        .andExpect(status().isOk());
+    postJson("/api/v1/chats?greet=false", "{\"careLevel\":2,\"maxHarshness\":3}")
+        .andExpect(status().isOk());
+
+    ArgumentCaptor<CallSessionRequest> sent = ArgumentCaptor.forClass(CallSessionRequest.class);
+    verify(chatService, times(2)).start(sent.capture(), any(), any(), eq(false));
+    assertThat(sent.getAllValues().get(0).startsFresh()).isTrue();
+    assertThat(sent.getAllValues().get(1).startsFresh()).isFalse();
+  }
+
+  @Test
+  @DisplayName("요청에 서버가 모르는 칸이 있어도 400 없이 무시한다 (새 FE 가 예전 서버에 새 칸을 보내도 열림)")
+  void ignoresUnknownFields() throws Exception {
+    given(chatService.start(any(), any(), any(), anyBoolean()))
+        .willReturn(ChatReplyResponse.opened(12L));
+
+    postJson(
+            "/api/v1/chats?greet=false",
+            "{\"careLevel\":2,\"maxHarshness\":3,\"notYetKnown\":true}")
+        .andExpect(status().isOk());
   }
 
   @Test
