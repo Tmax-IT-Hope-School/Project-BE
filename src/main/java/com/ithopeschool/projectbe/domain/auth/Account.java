@@ -59,6 +59,12 @@ public class Account {
   @Column(length = 100)
   private String schoolName;
 
+  // 홈 시간표에 쓰는 학년(1~3)과 반 번호. 설정에서 고르기 전에는 둘 다 비어 있습니다(null). (2026-10-31)
+  // 예전에는 FE 기기에만 저장해서, 새 기기에서 로그인하면 반을 다시 저장해야 시간표가 보였습니다.
+  private Integer schoolGrade;
+
+  private Integer schoolClassNo;
+
   // [선택 동의] 일기·감정 기록을 분석에 써도 된다고 했으면 true
   @Column(nullable = false)
   private boolean diaryAnalysisAgreed;
@@ -116,6 +122,12 @@ public class Account {
     this.schoolCode = schoolCode;
     this.schoolName = schoolName;
     this.diaryAnalysisAgreed = diaryAnalysisAgreed;
+  }
+
+  // 학년 · 반을 바꿉니다. 둘 다 null 이면 지웁니다. (값 검사는 AccountService 가 먼저 합니다)
+  public void changeSchoolClass(Integer schoolGrade, Integer schoolClassNo) {
+    this.schoolGrade = schoolGrade;
+    this.schoolClassNo = schoolClassNo;
   }
 
   // 비밀번호를 바꿉니다. 진짜 비밀번호가 아니라 PasswordHasher 가 만든 해시를 받습니다.

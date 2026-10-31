@@ -4,6 +4,8 @@ import com.ithopeschool.projectbe.domain.auth.GoogleIdTokenVerifier.GoogleProfil
 import com.ithopeschool.projectbe.domain.auth.dto.PasswordChangeRequest;
 import com.ithopeschool.projectbe.domain.auth.dto.ProfileResponse;
 import com.ithopeschool.projectbe.domain.auth.dto.ProfileUpdateRequest;
+import com.ithopeschool.projectbe.domain.auth.dto.SchoolClassRequest;
+import com.ithopeschool.projectbe.domain.auth.dto.SchoolClassResponse;
 import com.ithopeschool.projectbe.domain.auth.dto.WithdrawRequest;
 import com.ithopeschool.projectbe.domain.user.User;
 import com.ithopeschool.projectbe.domain.user.UserRepository;
@@ -18,7 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 // 로그인한 사람이 자기 계정을 관리하는 로직입니다. (이슈 #101)
 //
-//   내 정보 보기·고치기 / 비밀번호 바꾸기 / 로그아웃 / 탈퇴
+//   내 정보 보기·고치기 / 내 학년·반 보기·저장 / 비밀번호 바꾸기 / 로그아웃 / 탈퇴
 //
 // 모든 메서드는 currentUserProvider.getCurrentUserId() 로 시작합니다. 그래서 로그인하지 않은 요청은 401 이 나가고,
 // 남의 번호를 보내서 남의 계정을 고치는 일이 생기지 않습니다. (누구의 계정인지를 요청에서 받지 않습니다)
@@ -61,6 +63,27 @@ public class AccountService {
     account.updateProfile(
         account.getName(), request.schoolCode(), request.schoolName(), request.diaryAnalysis());
     return ProfileResponse.of(user, account);
+  }
+
+  // 내 학년 · 반 보기: 홈 시간표에 씁니다. 아직 안 골랐으면 둘 다 null 입니다. (2026-10-31)
+  @Transactional(readOnly = true)
+  public SchoolClassResponse getSchoolClass() {
+    Long userId = currentUserProvider.getCurrentUserId();
+    return SchoolClassResponse.of(findAccount(userId));
+  }
+
+  // 내 학년 · 반 저장: 설정에서 고른 값을 저장합니다. 둘 다 null 이면 지웁니다.
+  // 새 기기에서 로그인해도 FE 가 이 값을 받아 바로 시간표를 보여 줄 수 있게 서버에도 둡니다.
+  @Transactional
+  public SchoolClassResponse updateSchoolClass(SchoolClassRequest request) {
+    Long userId = currentUserProvider.getCurrentUserId();
+    // 하나만 오면 어느 반인지 알 수 없어서 막습니다. (범위 검사는 SchoolClassRequest 의 @Min · @Max)
+    if ((request.grade() == null) != (request.classNo() == null)) {
+      throw new ApiException(ErrorCode.VALIDATION_ERROR, "학년과 반은 같이 보내 주세요");
+    }
+    Account account = findAccount(userId);
+    account.changeSchoolClass(request.grade(), request.classNo());
+    return SchoolClassResponse.of(account);
   }
 
   // 비밀번호 바꾸기: 지금 비밀번호가 맞아야 합니다. 바꾸면 다른 기기의 로그인은 풀립니다.

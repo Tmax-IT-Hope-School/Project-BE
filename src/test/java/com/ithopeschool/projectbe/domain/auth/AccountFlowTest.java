@@ -179,7 +179,72 @@ class AccountFlowTest {
   }
 
   @Test
-  @DisplayName("토큰 없이는 다섯 주소 모두 401")
+  @DisplayName("학년 · 반은 서버에 저장돼서, 다른 기기로 로그인해도 같은 값을 받는다 (둘 다 null 이면 지움)")
+  void schoolClassFollowsTheAccount() throws Exception {
+    String email = "school-class-flow@starflow.com";
+    mockMvc
+        .perform(
+            post("/api/v1/auth/signup")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(signupBody("classPass2026").replace(EMAIL, email)))
+        .andExpect(status().isCreated());
+    String loginBody = "{\"email\":\"%s\",\"password\":\"classPass2026\"}".formatted(email);
+    String phone = tokenOf(loginBody);
+    String laptop = tokenOf(loginBody);
+
+    // 처음에는 비어 있습니다.
+    mockMvc
+        .perform(with(get("/api/v1/auth/school-class"), phone, null))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.grade").isEmpty())
+        .andExpect(jsonPath("$.classNo").isEmpty());
+
+    // 휴대폰에서 2학년 1반을 저장하면, 노트북에서도 같은 값을 받습니다.
+    mockMvc
+        .perform(with(put("/api/v1/auth/school-class"), phone, "{\"grade\":2,\"classNo\":1}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.grade").value(2))
+        .andExpect(jsonPath("$.classNo").value(1));
+    mockMvc
+        .perform(with(get("/api/v1/auth/school-class"), laptop, null))
+        .andExpect(jsonPath("$.grade").value(2))
+        .andExpect(jsonPath("$.classNo").value(1));
+
+    // 하나만 보내거나 범위를 넘으면 400 이고, 저장된 값은 그대로입니다.
+    mockMvc
+        .perform(with(put("/api/v1/auth/school-class"), phone, "{\"grade\":3,\"classNo\":null}"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.error.message").value("학년과 반은 같이 보내 주세요"));
+    mockMvc
+        .perform(with(put("/api/v1/auth/school-class"), phone, "{\"grade\":4,\"classNo\":31}"))
+        .andExpect(status().isBadRequest());
+    mockMvc
+        .perform(with(get("/api/v1/auth/school-class"), phone, null))
+        .andExpect(jsonPath("$.grade").value(2));
+
+    // 둘 다 null 이면 지웁니다.
+    mockMvc
+        .perform(with(put("/api/v1/auth/school-class"), phone, "{\"grade\":null,\"classNo\":null}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.grade").isEmpty());
+  }
+
+  // 이 로그인 본문으로 로그인해서 토큰을 받아 옵니다.
+  private String tokenOf(String loginBody) throws Exception {
+    String body =
+        mockMvc
+            .perform(
+                post("/api/v1/auth/login")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(loginBody))
+            .andReturn()
+            .getResponse()
+            .getContentAsString();
+    return body.split("\"token\":\"")[1].split("\"")[0];
+  }
+
+  @Test
+  @DisplayName("토큰 없이는 일곱 주소 모두 401")
   void allRequireLogin() throws Exception {
     mockMvc.perform(get("/api/v1/auth/profile")).andExpect(status().isUnauthorized());
     mockMvc
@@ -194,6 +259,13 @@ class AccountFlowTest {
             put("/api/v1/auth/password")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"currentPassword\":\"study2026\",\"newPassword\":\"newpass2026\"}"))
+        .andExpect(status().isUnauthorized());
+    mockMvc.perform(get("/api/v1/auth/school-class")).andExpect(status().isUnauthorized());
+    mockMvc
+        .perform(
+            put("/api/v1/auth/school-class")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"grade\":2,\"classNo\":1}"))
         .andExpect(status().isUnauthorized());
     mockMvc.perform(post("/api/v1/auth/logout")).andExpect(status().isUnauthorized());
     mockMvc
