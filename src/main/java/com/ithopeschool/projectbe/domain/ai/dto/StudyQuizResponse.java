@@ -5,15 +5,19 @@ import java.util.List;
 
 // "확인 문제" 의 결과입니다. 아무것도 저장하지 않습니다. (사진 · 자료 글도 저장하지 않음)
 //   { "showHelp": false,
-//     "questions": [ { "question": "lim (n→∞) 1/n 의 값은?", "choices": ["0", "1", "∞", "없다"],
+//     "questions": [ { "question": "lim (n→∞) 1/n 의 값은?", "choices": ["0", "1", "∞", "없다", "-1"],
 //                      "answerIndex": 0, "explanation": "n 이 한없이 커지면 1/n 은 0 에 한없이 가까워져.",
-//                      "passage": null } ],
+//                      "passage": null, "type": "CHOICE", "answers": [] },
+//                    { "question": "lim (n→∞) 2/n 의 값을 숫자로 써.", "choices": [], "answerIndex": -1,
+//                      "explanation": "…", "passage": null, "type": "SHORT", "answers": ["0"] } ],
 //     "unit": "함수", "reason": null }
 // - questions 가 null 이면 만들지 못한 것입니다. (AI 꺼짐 · 실패 · 쓸 문제 없음) 에러가 아니라 200 입니다.
 // - reason 이 "NOT_STUDY" 면 사진이나 주제가 공부 내용이 아니라서 문제를 내지 않은 것입니다. FE 는 다른 사진을 부탁합니다.
 // - unit 은 AI 가 정한 큰 단원 하나입니다. (퀴즈 결과를 통계에 저장할 때 씀, 2026-10-24) 못 정했으면 null 입니다.
 // - passage 는 그 문제를 풀려면 읽어야 하는 글(자료 글 · 사진 속 글에서 옮긴 부분, 2000자까지)입니다. 글 없이 풀리는 문제는 null.
 //   변형 문제(같은 지문 다른 문제)에 씁니다. (2026-10-24, #394)
+// - type 은 CHOICE(객관식, 보기는 요청의 choiceCount 개) · SHORT(주관식 단답형)입니다. 주관식은 요청에 shortCount 가 있을 때만 옵니다.
+//   주관식은 choices 가 빈 목록 · answerIndex 가 -1 이고, answers 가 정답으로 인정하는 표기들입니다. (채점은 FE, 2026-10-31)
 // - showHelp 가 true 면 주제 · 체크리스트 · 자료 글 · 사진 속 글에서 위기 표현이 감지된 것입니다.
 //
 // ⚠️ 정답(answerIndex)과 해설이 응답에 들어 있습니다. 채점은 FE 가 기기에서 합니다.

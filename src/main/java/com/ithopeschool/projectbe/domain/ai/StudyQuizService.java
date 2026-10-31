@@ -12,7 +12,8 @@ import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
-// "확인 문제" 의 로직입니다. 방금 공부한 것(주제 · 자료 글 · 교과서 사진)으로 4지선다 문제를 냅니다. (2026-10-18)
+// "확인 문제" 의 로직입니다. 방금 공부한 것(주제 · 자료 글 · 교과서 사진)으로 객관식(4 · 5지선다) 문제를 냅니다. (2026-10-18)
+// 요청에 주관식 수(shortCount)가 있으면 낱말 · 숫자 하나로 답이 정해지는 단답형을 그만큼 섞습니다. (2026-10-31)
 // ⚠️ 아무것도 저장하지 않습니다. 사진 · 자료 글은 메모리에서 OpenAI 로 보내고 끝이며, DB · 파일 · 로그 어디에도 남기지 않습니다.
 //    채점은 FE 가 기기에서 합니다.
 //
@@ -23,7 +24,7 @@ import org.springframework.stereotype.Service;
 //      학생의 학년을 알면 교육과정(2022 · 2015 개정)과 주제에 맞는 성취기준 몇 줄을 입력에 붙여 범위 안에서 내게 합니다.
 //      (CurriculumService.quizLines, 2026-10-18 "가벼운 RAG")
 //   4. AI 가 위기 표현이라고 하면 showHelp, 공부 내용이 아니라고 하면 reason: NOT_STUDY
-//   5. 받은 문제를 검사합니다. (StudyQuiz.from — 보기 4개 · 정답 위치 · 글자 수 · 말투 · 지문)
+//   5. 받은 문제를 검사합니다. (StudyQuiz.from — 보기 수 · 정답 위치 · 주관식 정답 표기 · 글자 수 · 말투 · 지문)
 //   6. 문제의 지문(passage, 사진 속 글에서 옮긴 것일 수 있음)에 위기 표현(단어 목록)이 있으면 showHelp (2026-10-24, #394)
 //
 // currentUserProvider.getCurrentUserId() 로 시작합니다. 로그인하지 않은 요청은 401 입니다.
@@ -76,7 +77,8 @@ public class StudyQuizService {
     }
 
     // 5) 문제마다 검사
-    List<StudyQuiz.Question> questions = StudyQuiz.from(answer.get(), request.count());
+    List<StudyQuiz.Question> questions =
+        StudyQuiz.from(answer.get(), request.count(), request.choiceCount(), request.shortCount());
 
     // 6) 지문에 위기 표현 (단어 목록). 사진 속 글에서 옮긴 지문은 2) 에서 보지 못한 글이라 한 번 더 봅니다. (#394)
     if (questions != null && CrisisText.hasCrisisText(passagesOf(questions))) {
