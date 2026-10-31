@@ -91,6 +91,12 @@ class LoginRequiredFlowTest {
               "/api/v1/auth/profile",
               "/api/v1/auth/profile",
               "{\"name\":\"김티맥\",\"nickname\":\"티맥이\",\"diaryAnalysis\":false}"),
+          new Api("GET", "/api/v1/auth/school-class", "/api/v1/auth/school-class", null),
+          new Api(
+              "PUT",
+              "/api/v1/auth/school-class",
+              "/api/v1/auth/school-class",
+              "{\"grade\":2,\"classNo\":1}"),
           new Api(
               "PUT",
               "/api/v1/auth/password",
