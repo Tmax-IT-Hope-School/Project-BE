@@ -196,6 +196,8 @@ erDiagram
         varchar name "실명 (20자까지, 비어 있을 수 있음. 실명은 받지 않는 방향이라 FE 가 입력을 없애면 이 칸을 지움)"
         varchar school_code "고른 고등학교의 번호 (안 골랐으면 비어 있음)"
         varchar school_name "고른 고등학교의 이름 (안 골랐으면 비어 있음)"
+        int school_grade "홈 시간표에 쓰는 학년 1~3 (설정에서 고르기 전에는 비어 있음)"
+        int school_class_no "홈 시간표에 쓰는 반 번호 1~30 (학년과 같이 비어 있거나 같이 채워짐)"
         boolean diary_analysis_agreed "일기·감정 기록을 분석에 써도 된다고 했으면 true (선택 동의)"
         timestamptz agreed_at "이용약관과 개인정보 수집·이용에 동의한 시각 (필수 동의)"
     }
