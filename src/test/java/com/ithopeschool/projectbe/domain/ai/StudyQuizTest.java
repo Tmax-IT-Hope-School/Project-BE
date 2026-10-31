@@ -157,4 +157,118 @@ class StudyQuizTest {
     assertThat(StudyQuiz.unitOf(new StudyQuiz.Answer(false, false, List.of()))).isNull();
     assertThat(StudyQuiz.unitOf(null)).isNull();
   }
+
+  // ---- 5지선다 · 주관식 섞기 (2026-10-31) ----
+
+  private static final List<String> FIVE = List.of("0", "1", "∞", "없다", "-1");
+
+  private static StudyQuiz.Answer.Item shortItem(String question, List<String> answers) {
+    return new StudyQuiz.Answer.Item(
+        StudyQuiz.SHORT, question, List.of(), null, answers, "n 이 커지면 0 에 가까워져.", null);
+  }
+
+  @Test
+  @DisplayName("보기 수가 5면 보기 5개 · 정답 위치 0~4 인 문제만 남기고, 4개짜리는 버린다")
+  void fiveChoices() {
+    List<StudyQuiz.Question> questions =
+        StudyQuiz.from(
+            answer(
+                item("다섯 개", FIVE, 4, "해설"),
+                item("네 개", CHOICES, 0, "해설"),
+                item("정답 위치 밖", FIVE, 5, "해설")),
+            3,
+            5,
+            0);
+
+    assertThat(questions).extracting(StudyQuiz.Question::question).containsExactly("다섯 개");
+    assertThat(questions.get(0).choices()).hasSize(5);
+    assertThat(questions.get(0).type()).isEqualTo(StudyQuiz.CHOICE);
+    assertThat(questions.get(0).answers()).isEmpty();
+    // 예전 모양(보기 수를 안 정함)은 그대로 4지선다입니다.
+    assertThat(StudyQuiz.from(answer(item("네 개", CHOICES, 0, "해설")), 3)).hasSize(1);
+  }
+
+  @Test
+  @DisplayName("주관식은 주관식 수만큼만 남기고, 정답 표기가 1~5개 · 각 20자까지가 아니면 버린다. 주관식을 안 부탁했으면 버린다")
+  void shortAnswers() {
+    List<StudyQuiz.Question> questions =
+        StudyQuiz.from(
+            answer(
+                item("객관식", FIVE, 0, "해설"),
+                shortItem(" 2/n 의 극한을 숫자로 써. ", List.of(" 0 ", "영", "0")),
+                shortItem("두 번째 주관식", List.of("1")),
+                item("객관식 2", FIVE, 1, "해설")),
+            3,
+            5,
+            1);
+
+    assertThat(questions)
+        .extracting(StudyQuiz.Question::question)
+        .containsExactly("객관식", "2/n 의 극한을 숫자로 써.", "객관식 2");
+    StudyQuiz.Question shortOne = questions.get(1);
+    assertThat(shortOne.isShort()).isTrue();
+    assertThat(shortOne.choices()).isEmpty();
+    assertThat(shortOne.answerIndex()).isEqualTo(-1);
+    // 앞뒤 빈칸을 지우고 같은 표기는 한 번만
+    assertThat(shortOne.answers()).containsExactly("0", "영");
+
+    // 정답 표기가 없거나 · 너무 길거나 · 너무 많으면 버립니다.
+    assertThat(StudyQuiz.from(answer(shortItem("빈 답", List.of())), 3, 5, 3)).isNull();
+    assertThat(StudyQuiz.from(answer(shortItem("긴 답", List.of("가".repeat(21)))), 3, 5, 3)).isNull();
+    assertThat(
+            StudyQuiz.from(
+                answer(shortItem("많은 답", List.of("1", "2", "3", "4", "5", "6"))), 3, 5, 3))
+        .isNull();
+    assertThat(StudyQuiz.from(answer(shortItem("답 없음", null)), 3, 5, 3)).isNull();
+    // 주관식을 안 부탁했으면 버립니다.
+    assertThat(StudyQuiz.from(answer(shortItem("부탁 안 함", List.of("0"))), 3, 5, 0)).isNull();
+  }
+
+  @Test
+  @DisplayName("보기 수 · 주관식 수에 맞춰 지침과 입력이 바뀌고, 예전 모양이면 4지선다 · 객관식만 그대로")
+  void instructionsFollowTheCounts() {
+    StudyQuizRequest mixed = new StudyQuizRequest("수열의 극한", null, null, null, 3, 5, 1);
+    AiQuestion question = StudyQuiz.question(mixed);
+
+    assertThat(question.instructions())
+        .contains("5지선다 · 주관식(단답형)")
+        .contains("choices 는 정확히 5개")
+        .contains("answerIndex 는 정답의 위치(0~4)")
+        .contains("4-1. 주관식(type SHORT)")
+        .contains("이유 쓰기 · 서술형 · 답이 여러 가지일 수 있는 문제는 내지 마")
+        .contains("마크다운(**, ##, `) · LaTeX");
+    assertThat(question.input()).contains("문제 수: 3\n보기 수: 5\n주관식 문제 수: 1");
+    assertThat(question.schema().toString()).contains("answers").contains("SHORT");
+
+    StudyQuizRequest old = new StudyQuizRequest("수열의 극한", null, null, null, 3);
+    assertThat(StudyQuiz.question(old).instructions())
+        .contains("4지선다 문제")
+        .contains("choices 는 정확히 4개")
+        .doesNotContain("4-1.");
+    assertThat(StudyQuiz.question(old).input()).doesNotContain("보기 수").doesNotContain("주관식");
+  }
+
+  @Test
+  @DisplayName("요청의 보기 수는 안 보내면 4, 주관식 수는 안 보내면 0이고 문제 수보다 크면 문제 수로 줄인다")
+  void requestDefaults() {
+    StudyQuizRequest old = new StudyQuizRequest("수학", null, null, null, null);
+    assertThat(old.choiceCount()).isEqualTo(4);
+    assertThat(old.shortCount()).isZero();
+    assertThat(new StudyQuizRequest("수학", null, null, null, 2, 5, 4).shortCount()).isEqualTo(2);
+  }
+
+  @Test
+  @DisplayName("문제 · 보기 · 해설 · 주관식 정답의 마크다운 · LaTeX 기호는 지우고, 빈칸 밑줄 · 곱하기 별은 둔다")
+  void plainText() {
+    assertThat(StudyQuiz.plainOf("**수열**의 `극한`")).isEqualTo("수열의 극한");
+    assertThat(StudyQuiz.plainOf("## 문제\n$x^2$ 와 \\(y\\)")).isEqualTo("문제\nx^2 와 y");
+    assertThat(StudyQuiz.plainOf("She lived here ___ 2020. 2*3"))
+        .isEqualTo("She lived here ___ 2020. 2*3");
+    List<StudyQuiz.Question> questions =
+        StudyQuiz.from(
+            answer(item("**굵은** 문제", List.of("`가`", "나", "다", "라", "마"), 0, "$x$ 라서")), 3, 5, 0);
+    assertThat(questions.get(0).question()).isEqualTo("굵은 문제");
+    assertThat(questions.get(0).choices().get(0)).isEqualTo("가");
+    assertThat(questions.get(0).explanation()).isEqualTo("x 라서");
+  }
 }
