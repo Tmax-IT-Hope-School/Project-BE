@@ -140,8 +140,8 @@ public class ChatAiClient {
           "",
           "[답 모양]",
           "- reply: 학생에게 할 말. 물은 것에 먼저 답해. 답 없이 되묻기만 하지 마."
-              + " 설명은 다섯 문장까지, 문제 · 풀이 단계는 줄을 바꾼 번호 목록(1. 2. 3.)으로 써."
-              + " 문제는 한 답에 5개까지, 풀이는 7단계까지, 전체 700자 안쪽. 질문은 답한 뒤 맨 끝에 하나까지만.",
+              + " 설명은 다섯 문장까지, 풀이 단계는 줄을 바꾼 번호 목록(1. 2. 3.)으로 써."
+              + " 풀이는 7단계까지, 전체 700자 안쪽. 질문은 답한 뒤 맨 끝에 하나까지만.",
           "- quickReplies: 학생이 눌러서 바로 보낼 짧은 답 2~3개. 학생 말투로, 각각 15자 안쪽."
               + " 예: '풀이 보여 줘' · '하나 더 내 줘' · '이해했어'.",
           "- action: 학생이 지금 공부를 시작하겠다고 하면 start_timer."
@@ -149,8 +149,9 @@ public class ChatAiClient {
               + " 새로 할 일을 정했으면 create_card 와 title(20자 안쪽) · minutes(30~120, 보통 40~60)."
               + " 10분 · 20분처럼 30분보다 짧은 공부는 권하지 마."
               + " 시험 · 대회 · 수행평가처럼 무엇을 언제까지 준비한다고 하면 make_plan 과 title(목표 한 줄, 30자 안쪽) ·"
-              + " date(마감 날 YYYY-MM-DD, 모르면 null). 학생이 방금 공부를 끝냈다고 하거나 잘 알았는지 확인해 달라고 하면"
-              + " start_quiz 와 title(공부한 주제, 30자 안쪽). 문제를 reply 에 직접 냈거나 그 밖이면 none."
+              + " date(마감 날 YYYY-MM-DD, 모르면 null). 학생이 문제를 내 달라고 하거나(개수 상관없이) 방금 공부를 끝냈다고 하거나"
+              + " 잘 알았는지 확인해 달라고 하면 start_quiz 와 title(공부한 주제, 30자 안쪽). 이때 reply 에 문제를 쓰지 마."
+              + " 서술형 · 주관식을 콕 집어 부탁해서 문제를 reply 에 직접 냈거나 그 밖이면 none."
               + " date 는 make_plan 에만 써.",
           "- tags: [이번 대화의 주제] 에 '고를 수 있는 이유' 가 있을 때만, 학생 말에서 보이는 이유 값 0~3개."
               + " 그 목록에 없는 값은 쓰지 마. 주제가 없거나 이유가 안 보이면 빈 목록.",
@@ -485,9 +486,41 @@ public class ChatAiClient {
 
   // 학생 기기는 AI 의 말을 다음 말 보내기 · 끝내기 때 대화 줄로 다시 보냅니다. 그 한 줄이 서버 한도를 넘으면
   // 그다음부터 400 으로 막혀 채팅이 멈춥니다. 그래서 한도까지만 남깁니다. (2026-10-31, 과목 쌤의 문제 목록 · 풀이처럼 긴 답)
-  //   1000자가 넘는 말 → 앞의 1000자 (이모지 한가운데서는 자르지 않음)
+  // 글자 수로만 자르면 단어 · 문장 한가운데서 끊겨서, 한도 안의 마지막 줄바꿈 · 문장 끝에서 자르고 " …" 를 붙입니다.
+  // 그런 곳이 앞쪽 절반에만 있으면(아주 긴 한 문장) 한도에서 자릅니다. " …" 까지 합쳐도 한도를 넘지 않습니다.
+  //   "가" 1200개                     → "가" 998개 + " …"            (1000자)
+  //   "가" 600개 + 줄바꿈 + "나" 600개 → "가" 600개 + " …"            (줄바꿈에서)
+  //   이모지 한가운데                  → 그 이모지 앞에서
   static String fitLine(String reply) {
-    return CallScript.cutKeepingEmoji(reply, CallFinishRequest.Line.MAX_TEXT_LENGTH);
+    int max = CallFinishRequest.Line.MAX_TEXT_LENGTH;
+    if (reply.length() <= max) {
+      return reply;
+    }
+    String cut = CallScript.cutKeepingEmoji(reply, max - CUT_MARK.length());
+    int end = lastBreakOf(cut);
+    String body = end >= cut.length() / 2 ? cut.substring(0, end) : cut;
+    return body.stripTrailing() + CUT_MARK;
+  }
+
+  // 길어서 자른 답 끝에 붙이는 표시
+  static final String CUT_MARK = " …";
+
+  // 마지막 줄바꿈의 위치, 없으면 마지막 문장 끝(. ? ! 바로 뒤에 빈칸)의 바로 뒤 위치. 둘 다 없으면 -1
+  // '1.' · '3.5' 처럼 숫자 뒤의 점은 문장 끝이 아닙니다. (목록 번호)
+  static int lastBreakOf(String text) {
+    int newline = text.lastIndexOf('\n');
+    if (newline >= text.length() / 2) {
+      return newline;
+    }
+    for (int i = text.length() - 2; i > 0; i--) {
+      char c = text.charAt(i);
+      boolean ends = c == '.' || c == '?' || c == '!';
+      boolean afterDigit = c == '.' && Character.isDigit(text.charAt(i - 1));
+      if (ends && !afterDigit && Character.isWhitespace(text.charAt(i + 1))) {
+        return i + 1;
+      }
+    }
+    return newline;
   }
 
   // GPT 에게 줄 입력 글입니다. 대화를 "코치: … / 학생: …" 한 줄씩으로 적고, 다음 말을 부탁합니다.

@@ -402,11 +402,12 @@ class ChatAiClientTest {
         .startsWith("\n\n[답 모양]")
         .contains("물은 것에 먼저 답해. 답 없이 되묻기만 하지 마")
         .contains("번호 목록(1. 2. 3.)")
-        .contains("문제는 한 답에 5개까지")
         .contains("질문은 답한 뒤 맨 끝에 하나까지만")
-        // 확인 문제(start_quiz)는 그대로 씁니다.
-        .contains("start_quiz 와 title(공부한 주제, 30자 안쪽)")
-        .contains("문제를 reply 에 직접 냈거나 그 밖이면 none")
+        // 문제를 내 달라고 하면 글로 쓰지 않고 앱의 4지선다(start_quiz)로 냅니다. (2026-10-31)
+        .contains("학생이 문제를 내 달라고 하거나(개수 상관없이)")
+        .contains("start_quiz 와 title(공부한 주제, 30자 안쪽). 이때 reply 에 문제를 쓰지 마")
+        .contains("서술형 · 주관식을 콕 집어 부탁해서 문제를 reply 에 직접 냈거나 그 밖이면 none")
+        .doesNotContain("문제는 한 답에 5개까지")
         .contains("학생이 힘든 마음을 말하면 action 은 none")
         .doesNotContain("두세 문장")
         .doesNotContain("day_plan");
@@ -421,14 +422,32 @@ class ChatAiClientTest {
     String json =
         "{\"reply\":\"" + longReply + "\",\"quickReplies\":[],\"action\":null,\"tags\":[]}";
 
-    assertThat(ChatAiClient.parseTurn(json).reply()).hasSize(1000);
+    assertThat(ChatAiClient.parseTurn(json).reply()).hasSize(1000).endsWith(" …");
     // JSON 이 아니어서 글 그대로 쓰는 답도 같습니다.
     assertThat(ChatAiClient.parseTurn(longReply).reply()).hasSize(1000);
     // 짧은 답은 그대로입니다.
     assertThat(ChatAiClient.parseTurn("{\"reply\":\"좋아\",\"quickReplies\":[]}").reply())
         .isEqualTo("좋아");
     // 이모지 한가운데서 자르지 않습니다.
-    assertThat(ChatAiClient.fitLine("가".repeat(999) + "😀")).isEqualTo("가".repeat(999));
+    assertThat(ChatAiClient.fitLine("가".repeat(997) + "😀" + "가".repeat(10)))
+        .isEqualTo("가".repeat(997) + " …");
+  }
+
+  @Test
+  @DisplayName("긴 답은 한도 안의 마지막 줄바꿈 · 문장 끝에서 자르고 ' …' 를 붙인다. 목록 번호의 점에서는 자르지 않는다 (2026-10-31)")
+  void fitLineCutsAtACleanPlace() {
+    // 줄바꿈에서
+    assertThat(ChatAiClient.fitLine("가".repeat(600) + "\n" + "나".repeat(600)))
+        .isEqualTo("가".repeat(600) + " …");
+    // 문장 끝에서 (마침표까지 남김)
+    assertThat(ChatAiClient.fitLine("가".repeat(600) + ". " + "나".repeat(600)))
+        .isEqualTo("가".repeat(600) + "." + " …");
+    // '3.' 같은 목록 번호에서는 자르지 않습니다. 끊을 곳이 앞쪽 절반에만 있으면 한도에서 자릅니다.
+    assertThat(ChatAiClient.fitLine("가".repeat(200) + ". 3. " + "나".repeat(900)))
+        .hasSize(1000)
+        .endsWith("나 …");
+    // 한도 안이면 그대로입니다.
+    assertThat(ChatAiClient.fitLine("1. 첫째\n2. 둘째")).isEqualTo("1. 첫째\n2. 둘째");
   }
 
   @Test
