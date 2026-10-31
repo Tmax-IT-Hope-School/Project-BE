@@ -153,4 +153,35 @@ class StudyQuizServiceTest {
         .contains("[12미적Ⅰ-01-02]");
     assertThat(question.getValue().instructions()).contains("교육과정");
   }
+
+  @Test
+  @DisplayName("보기 수 · 주관식 수를 보내면 지침 · 입력에 넣고, 그 수대로 검사한 객관식 · 주관식을 돌려준다 (2026-10-31)")
+  void mixesFiveChoicesAndShortAnswers() {
+    StudyQuiz.Answer.Item five =
+        new StudyQuiz.Answer.Item(
+            "lim (n→∞) 1/n 의 값은?", List.of("0", "1", "∞", "없다", "-1"), 0, "0 에 가까워져.", null);
+    StudyQuiz.Answer.Item shortOne =
+        new StudyQuiz.Answer.Item(
+            StudyQuiz.SHORT,
+            "lim (n→∞) 2/n 의 값을 숫자로 써.",
+            List.of(),
+            null,
+            List.of("0"),
+            "0 이야.",
+            null);
+    given(aiClient.ask(eq(USER_ID), eq(GptUsageKind.ASSIST), any(), eq(StudyQuiz.Answer.class)))
+        .willReturn(Optional.of(new StudyQuiz.Answer(false, false, List.of(five, shortOne))));
+
+    StudyQuizResponse made =
+        service.make(new StudyQuizRequest("수열의 극한", null, null, null, 2, 5, 1));
+
+    assertThat(made.questions()).hasSize(2);
+    assertThat(made.questions().get(0).choices()).hasSize(5);
+    assertThat(made.questions().get(1).isShort()).isTrue();
+    assertThat(made.questions().get(1).answers()).containsExactly("0");
+    ArgumentCaptor<AiQuestion> question = ArgumentCaptor.forClass(AiQuestion.class);
+    verify(aiClient).ask(eq(USER_ID), eq(GptUsageKind.ASSIST), question.capture(), any());
+    assertThat(question.getValue().input()).contains("보기 수: 5").contains("주관식 문제 수: 1");
+    assertThat(question.getValue().instructions()).contains("5지선다");
+  }
 }
