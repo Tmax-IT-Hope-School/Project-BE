@@ -57,11 +57,13 @@ public class StudyQuizService {
     }
 
     // 3) AI (사진이 있으면 사진과 함께)
+    // 문제 여러 개 · 보기 · 해설을 한 번에 쓰느라 10초(ask)로는 모자랄 수 있어서, 글로 물을 때도 25초까지 기다립니다.
+    // (2026-11-03 "문제를 못 만들었어" 가 나오고 다시 하면 되는 일이 있었음. FE 는 30초까지 기다립니다)
     String query = (request.topic() + " " + String.join(" ", request.checklist())).trim();
     AiQuestion question = StudyQuiz.question(request, curriculumService.quizLines(userId, query));
     Optional<StudyQuiz.Answer> answer =
         request.image() == null
-            ? aiClient.ask(userId, GptUsageKind.ASSIST, question, StudyQuiz.Answer.class)
+            ? aiClient.askLong(userId, GptUsageKind.ASSIST, question, StudyQuiz.Answer.class)
             : aiClient.askWithImage(
                 userId, GptUsageKind.ASSIST, question, request.image(), StudyQuiz.Answer.class);
     if (answer.isEmpty()) {
