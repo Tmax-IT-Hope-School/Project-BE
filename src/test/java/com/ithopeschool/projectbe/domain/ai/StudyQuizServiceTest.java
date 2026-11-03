@@ -73,9 +73,9 @@ class StudyQuizServiceTest {
   }
 
   @Test
-  @DisplayName("사진이 없으면 글로만 묻고(ASSIST 한도), 검사한 문제를 돌려준다. 못 받으면 questions: null")
+  @DisplayName("사진이 없으면 글로만 25초까지 기다려 묻고(10초 ask 는 안 씀), 검사한 문제를 돌려준다. 못 받으면 questions: null")
   void asksWithTextOnly() {
-    given(aiClient.ask(eq(USER_ID), eq(GptUsageKind.ASSIST), any(), eq(StudyQuiz.Answer.class)))
+    given(aiClient.askLong(eq(USER_ID), eq(GptUsageKind.ASSIST), any(), eq(StudyQuiz.Answer.class)))
         .willReturn(Optional.empty())
         .willReturn(Optional.of(new StudyQuiz.Answer(false, false, List.of(ITEM))));
 
@@ -88,6 +88,7 @@ class StudyQuizServiceTest {
             new StudyQuiz.Question(
                 "lim (n→∞) 1/n 의 값은?", List.of("0", "1", "∞", "없다"), 0, "0 에 가까워져.", null));
     verify(aiClient, never()).askWithImage(any(), any(), any(), any(), any());
+    verify(aiClient, never()).ask(any(), any(), any(), any());
   }
 
   @Test
@@ -129,7 +130,7 @@ class StudyQuizServiceTest {
     assertThat(service.make(request("교과서 52쪽", null, IMAGE)))
         .isEqualTo(StudyQuizResponse.notStudy());
     assertThat(service.make(request("교과서 52쪽", null, IMAGE))).isEqualTo(StudyQuizResponse.help());
-    verify(aiClient, never()).ask(any(), any(), any(), any());
+    verify(aiClient, never()).askLong(any(), any(), any(), any());
   }
 
   @Test
@@ -141,13 +142,13 @@ class StudyQuizServiceTest {
                 "교육과정: 고2 · 2022 개정 교육과정",
                 "관련 성취기준(교육부 고시 원문):",
                 "- [12미적Ⅰ-01-02] 미적분Ⅰ · 함수의 극한과 연속: 함수의 극한값을 구할 수 있다."));
-    given(aiClient.ask(eq(USER_ID), eq(GptUsageKind.ASSIST), any(), eq(StudyQuiz.Answer.class)))
+    given(aiClient.askLong(eq(USER_ID), eq(GptUsageKind.ASSIST), any(), eq(StudyQuiz.Answer.class)))
         .willReturn(Optional.of(new StudyQuiz.Answer(false, false, List.of(ITEM))));
 
     service.make(new StudyQuizRequest("미적분 극한", List.of("교과서 52쪽"), null, null, null));
 
     ArgumentCaptor<AiQuestion> question = ArgumentCaptor.forClass(AiQuestion.class);
-    verify(aiClient).ask(eq(USER_ID), eq(GptUsageKind.ASSIST), question.capture(), any());
+    verify(aiClient).askLong(eq(USER_ID), eq(GptUsageKind.ASSIST), question.capture(), any());
     assertThat(question.getValue().input())
         .contains("교육과정: 고2 · 2022 개정 교육과정")
         .contains("[12미적Ⅰ-01-02]");
@@ -169,7 +170,7 @@ class StudyQuizServiceTest {
             List.of("0"),
             "0 이야.",
             null);
-    given(aiClient.ask(eq(USER_ID), eq(GptUsageKind.ASSIST), any(), eq(StudyQuiz.Answer.class)))
+    given(aiClient.askLong(eq(USER_ID), eq(GptUsageKind.ASSIST), any(), eq(StudyQuiz.Answer.class)))
         .willReturn(Optional.of(new StudyQuiz.Answer(false, false, List.of(five, shortOne))));
 
     StudyQuizResponse made =
@@ -180,7 +181,7 @@ class StudyQuizServiceTest {
     assertThat(made.questions().get(1).isShort()).isTrue();
     assertThat(made.questions().get(1).answers()).containsExactly("0");
     ArgumentCaptor<AiQuestion> question = ArgumentCaptor.forClass(AiQuestion.class);
-    verify(aiClient).ask(eq(USER_ID), eq(GptUsageKind.ASSIST), question.capture(), any());
+    verify(aiClient).askLong(eq(USER_ID), eq(GptUsageKind.ASSIST), question.capture(), any());
     assertThat(question.getValue().input()).contains("보기 수: 5").contains("주관식 문제 수: 1");
     assertThat(question.getValue().instructions()).contains("5지선다");
   }

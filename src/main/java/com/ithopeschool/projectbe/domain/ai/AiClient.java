@@ -145,7 +145,7 @@ public class AiClient {
     return send(restClient, model, userId, kind, question, question.input(), answerType);
   }
 
-  // ask 와 같고, 답을 25초까지 기다립니다. 답이 긴 기능(긴 계획 LongPlanService)에서 씁니다.
+  // ask 와 같고, 답을 25초까지 기다립니다. 답이 긴 기능(긴 계획 LongPlanService · 확인 문제 StudyQuizService)에서 씁니다.
   public <T> Optional<T> askLong(
       Long userId, GptUsageKind kind, AiQuestion question, Class<T> answerType) {
     return send(longRestClient, model, userId, kind, question, question.input(), answerType);
