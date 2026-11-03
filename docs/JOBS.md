@@ -151,6 +151,9 @@ URL 은 `https://project-be-mxxc.onrender.com/api/v1/jobs/<작업 이름>` 입�
 | `care-stages` | 매일 04:10 | **PR #331 이 main 에 배포된 뒤** | 모든 학생의 오늘 관리 단계 정하기 | `[관리 단계] 판정 n명` | 6-9 (#331) |
 | `calendar-alarm` | **10분마다** (:00 · :10 · :20 …) | **feat/calendar-alarm 이 main 에 배포되고, Neon 에 `17-calendar-alarms.sql` 을 실행한 뒤** | 구글 캘린더 일정 시작 10분 전에 푸시 | `[캘린더 알림] 보냄 n개 · 건너뜀 n개` | 6-11 |
 | `school-daily` | 매일 05:00 (학교가 많아지면 05:00 ~ 06:00 10분마다) | **feat/school-daily-crawl 이 main 에 배포된 뒤** | 학교마다 학사일정 · 급식 미리 받기 + 홈페이지 가정통신문 · 공지 제목 읽기 (`school-events` 일도 같이 함) | `[학교 하루 작업] 학교 n곳 중 n곳을 처리했어요. …` | 6-10 |
+| `variant-expire` | 매일 04:05 | **feat/variant-problems 가 main 에 배포되고 db/migrations/22 를 실행한 뒤** | 지난 날의 답하지 않은 변형 과제를 만료 | `[변형 만료] 기준 날짜=…, 마감된 과제 n개` | 6-12 |
+| `variant-daily` | 매일 04:10 ~ 08:00, **10분마다** | 위와 같음 | 오늘 낼 변형 문제를 AI 로 만들고 과제로 배정 | `[변형 일일] 기준 날짜=…, 학생 n명, 새 과제 n개, 아직 준비 중 n개` | 6-12 |
+| `variant-weekly` | **매주 월요일** 04:10 ~ 08:00, 10분마다 | 위와 같음 | 지난주(월 ~ 일) 주간 심화 세트 만들기 (월요일이 아니면 아무것도 안 함) | `[변형 주간] … 주 세트: 대상 학생 n명, …` | 6-12 |
 
 - **배포되기 전의 작업을 부르면 404 "그런 작업이 없어요"** 입니다. 실패가 계속 쌓이면 cron-job.org 가 알람을 꺼 버리므로(연속 25회), 표의 "언제 만드나" 가 지난 뒤에 만듭니다.
 - 하루가 바뀌는 때가 **새벽 4시**라서, "어제" 를 보는 작업은 4시 뒤(04:10 · 05:00)에 둡니다.
@@ -434,6 +437,26 @@ curl -i -X POST http://localhost:8080/api/v1/jobs/school-daily -H "X-Job-Key: lo
 
 ```bash
 curl -i -X POST http://localhost:8080/api/v1/jobs/calendar-alarm -H "X-Job-Key: local-job-key"
+```
+
+### 6-12. 변형 문제 (`variant-expire` · `variant-daily` · `variant-weekly`)
+
+변형 문제 기능(docs/VARIANT-SPEC.md 8장)의 작업 세 개입니다. 코드: `domain/variant/VariantExpireJob` · `VariantDailyJob` · `VariantWeeklyJob`
+
+- **`variant-expire`** (매일 04:05): 마감이 지난 PENDING 과제를 EXPIRED 로 바꿉니다. 학습 항목은 그대로라서 그 문제는 오늘 다시 나옵니다(벌점 없음).
+- **`variant-daily`** (매일 04:10 ~ 08:00, 10분마다): 오늘 낼 차례인 학습 항목마다 변형을 AI 로 만들고(검증 통과한 것만) 과제로 배정합니다.
+- **`variant-weekly`** (매주 월요일 04:10 ~ 08:00, 10분마다): 지난주(월 ~ 일)의 주간 심화 세트를 만듭니다. 월요일이 아닌 날에 부르면 바로 끝나서 매일 불러도 됩니다.
+
+**30초 제한:** 변형 하나를 만드는 데 AI 호출이 최대 3번(한 번에 25초까지)이라 오래 걸립니다. 그래서 한 번 부를 때 **`job-budget-sec`(20초)** 가 지나면 새로 만들기를 시작하지 않고, 남은 것은 다음 호출이 이어서 합니다.
+변형 하나가 20초를 넘겨 끝날 수 있어서 cron-job.org 쪽에서는 **30초 시간 초과로 보일 수 있지만**, 서버는 그 일을 끝까지 하고 다음 호출이 이어받습니다. (같은 작업이 겹치면 실행기가 건너뜀)
+이미 배정한 과제 · 오늘 3번 실패한 항목은 건너뛰어서 여러 번 불러도 안전합니다.
+
+**AI 가 꺼져 있으면**(내 컴퓨터) 새로 만들지 않고, 이미 만들어 둔 변형만 배정합니다.
+
+**내 컴퓨터에서 시험**
+
+```bash
+curl -i -X POST http://localhost:8080/api/v1/jobs/variant-daily -H "X-Job-Key: local-job-key"
 ```
 
 ## 7. 알아 둘 점

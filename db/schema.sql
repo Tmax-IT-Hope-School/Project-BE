@@ -821,6 +821,10 @@ create table source_problems (
     correct_answer varchar(200),
     student_answer varchar(200),
     problem_text varchar(2000) not null,
+    origin varchar(10) not null check ((origin in ('MANUAL','SEED','QUIZ'))),
+    subject varchar(30),
+    standard_code varchar(30),
+    passage_text varchar(2000),
     primary key (id)
 );
 
@@ -853,6 +857,7 @@ create table variants (
     computed_latex varchar(1000),
     problem_text varchar(2000) not null,
     verification_code varchar(2000) not null,
+    verification_method varchar(10) not null check ((verification_method in ('SYMJA','AI_SOLVE'))),
     solution varchar(4000) not null,
     verification_log varchar(4000) not null,
     primary key (id)

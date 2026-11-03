@@ -6194,6 +6194,179 @@ FE 는 이 한 줄을 종료 팝업의 증빙 요약 칸에 넣고, 학생이 �
 | 400  | 날짜가 없음 · 날짜가 오늘이나 내일이 아님 · 개수 · 글자 수 · 숫자가 범위 밖 · 시각 모양이 틀림 |
 | 401  | 로그인하지 않음                                                                                |
 
+### 변형 문제
+
+학생이 틀린 수학 문제를 **매일 변형해서 다시 내고**, 매주 월요일에 **심화 세트**를 냅니다. 변형 문제는 AI 가 만들고, **정답을 계산 코드(Symja)로 확인한 문제만** 학생에게 나갑니다. **모두 로그인이 필요합니다.**
+규칙 전체는 [VARIANT-SPEC.md](./VARIANT-SPEC.md) 에 있습니다. (레벨 L-1 비계 · L0 재인출 · L1 변형 · L2 심화)
+
+> ⚠️ 답을 내기 전에는 정답 · 해설 · 선지 해설을 **절대** 주지 않습니다. 선지는 화면용 LaTeX(`choicesLatex`)만 줍니다.
+
+#### 원본 문항 등록
+
+`POST /api/v1/variant/source-problems` — 학생이 푼 문항(맞은 것 · 틀린 것 모두)을 등록합니다. 나중에 사진 OCR 이 생기면 이 주소만 부르면 됩니다.
+
+```json
+{
+  "problemText": "이차방정식 $x^2-5x+k=0$의 두 근의 곱이 6일 때, 상수 $k$의 값을 구하시오.",
+  "choices": null,
+  "correctAnswer": "6",
+  "studentAnswer": "5",
+  "isCorrect": false,
+  "hasFigure": false,
+  "unitCode": "CM1-U05",
+  "typeCode": "CM1-U05-T03",
+  "solvedAt": 1792841400000
+}
+```
+
+| 필드                              | 규칙                                                                                                          |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `problemText`                     | 필수. 2000자까지. 수식은 `$...$`                                                                              |
+| `choices`                         | 선택. 원본이 객관식이면 선지 글자들 (10개 · 하나에 200자까지)                                                 |
+| `correctAnswer` · `studentAnswer` | 선택. 200자까지                                                                                               |
+| `isCorrect`                       | 필수. 학생이 맞혔는지                                                                                         |
+| `hasFigure`                       | 선택(기본 false). 그림 · 그래프가 있어야 풀 수 있으면 true → 저장만 하고 출제하지 않음                         |
+| `unitCode` · `typeCode`           | 선택. 둘 다 보내거나 둘 다 빼기. 분류체계(`src/main/resources/variant/taxonomy.json`)에 있는 짝만. 빼면 AI 가 분류 |
+| `solvedAt`                        | 필수. 푼 순간 (밀리초 숫자)                                                                                   |
+
+**응답 201** — `{ "id": "3", "supportStatus": "supported", "unitCode": "CM1-U05", "typeCode": "CM1-U05-T03", "reviewItemId": "7" }`
+
+- `supportStatus`: `supported`(출제 가능) · `pending_classification`(AI 가 꺼져 있어 분류 대기) · `needs_review`(사람이 코드를 정해야 함) · `unsupported_figure`(그림 필요)
+- 틀린 문항이고 `supported` 면 학습 항목이 생기고(`reviewItemId`), **다음 날부터** 매일 변형이 나옵니다.
+
+`PATCH /api/v1/variant/source-problems/{id}/classification` — `pending_classification` · `needs_review` 원본의 단원 · 유형을 사람이 정합니다. 본문 `{ "unitCode": "CM1-U05", "typeCode": "CM1-U05-T03" }`. 틀린 문항이면 이때 학습 항목이 생깁니다. 다른 상태의 원본이면 409.
+
+#### 확인 문제 결과를 원본으로 (2026-10-24, #394)
+
+`POST /api/v1/variant/quiz-results` — 공부 카드를 끝내고 푼 **확인 문제**(`POST /api/v1/ai/quiz`, 4지선다) 한 묶음을 보내면, 문제마다 확인한 뒤 변형 문제의 원본으로 저장합니다. (VARIANT-SPEC.md 5-1)
+
+> ⚠️ 통계 탭의 `POST /api/v1/quiz-results`(퀴즈 요약 통계, 다른 기능)와 **다른 주소 · 다른 목적**입니다. 이 API 는 문제 하나하나를 변형 문제의 원본으로 씁니다.
+
+```json
+{
+  "topic": "국어 비문학 3지문",
+  "solvedAt": 1792841400000,
+  "guessed": false,
+  "questions": [
+    { "question": "윗글의 내용과 일치하는 것은?", "passage": "…지문…",
+      "choices": ["…", "…", "…", "…"], "answerIndex": 2, "chosenIndex": 1 }
+  ]
+}
+```
+
+| 필드                          | 규칙                                                                                   |
+| ----------------------------- | -------------------------------------------------------------------------------------- |
+| `topic`                       | 필수. 100자까지. 무엇에 대한 문제였는지                                                |
+| `solvedAt`                    | 필수. 다 푼 순간 (밀리초 숫자)                                                         |
+| `guessed`                     | 필수. FE 가 "찍은 것 같다" 고 본 결과면 true → **맞힌 문제는 원본으로 쓰지 않음**      |
+| `questions`                   | 필수. 1 ~ 5개                                                                          |
+| `question`                    | 필수. 2000자까지                                                                       |
+| `passage`                     | 선택(null 가능). 문제가 기대는 지문, 2000자까지                                        |
+| `choices`                     | 필수. 정확히 4개, 하나에 200자까지                                                     |
+| `answerIndex` · `chosenIndex` | 필수. 0 ~ 3 정수 (소수면 400)                                                          |
+
+문제마다 서버가 하는 일:
+
+1. **맞았는지는 서버가 다시 셉니다**(`chosenIndex == answerIndex`). FE 판정은 쓰지 않습니다.
+2. `guessed=true` 면 맞힌 문제는 건너뜁니다(`skipped.guessedCorrect`).
+3. **정답 확인**: 정답을 숨긴 채 AI 에게 다시 풀게 해서 `answerIndex` 와 다르면 저장하지 않습니다(`skipped.answerMismatch`). 확인 문제도 AI 가 만든 것이라 정답이 틀릴 수 있기 때문입니다.
+4. **분류**: 고1 공통수학1 이면 단원 · 유형(분류체계), 그 밖의 과목이면 **2022 개정 성취기준**(`resources/curriculum/2022-*.json`) 코드. 어디에도 안 맞거나 자신 없는 수학 밖 과목은 저장하지 않습니다(`skipped.unsupported`). 수학인데 자신이 없으면 `needs_review` 로 저장합니다.
+5. 저장(`origin=QUIZ`). 틀린 문제는 학습 항목이 생겨 **다음 날부터 매일 검증 문제**, 맞은 문제는 **주간 심화 (A)** 의 재료가 됩니다.
+
+**AI 가 꺼져 있거나 답하지 않으면** 정답을 확인할 수 없어서 저장하지 않습니다(`skipped.unsupported`). 문제마다 AI 를 2 ~ 3번 부르므로 응답이 수십 초 걸릴 수 있습니다. FE 는 기다리지 않고 보내기만 합니다.
+
+**응답 200** — `{ "registered": 2, "skipped": { "answerMismatch": 1, "guessedCorrect": 0, "unsupported": 0 } }`
+
+- 400: 칸이 없음 · 보기가 4개가 아님 · 번호가 0 ~ 3 밖 · 문제가 0개거나 6개 이상 · 글자 수 초과
+- 401: 로그인하지 않음 · 403: 최신 동의 문구에 동의하지 않음 (저장하는 요청)
+- 수학이 아닌 과목의 원본도 틀리면 학습 항목이 생기고, 변형은 계산 대신 **AI 독립 풀이(G7)** 로 확인한 것만 냅니다. (VARIANT-SPEC.md 6-4)
+
+#### 그날의 일일 과제
+
+`GET /api/v1/variant/daily?date=2026-10-25` — `date` 를 빼면 오늘(새벽 4시 기준). 오늘을 부르면 **이미 만들어 둔 변형**이 있는 항목을 바로 배정합니다(여러 번 불러도 같음). 아직 못 만든 수는 `preparingCount` 입니다. (변형은 예약 작업 `variant-daily` 가 만듭니다)
+
+```json
+{
+  "date": "2026-10-25",
+  "items": [
+    {
+      "assignmentId": "12",
+      "level": 0,
+      "format": "mc5",
+      "passage": null,
+      "problemText": "이차부등식 $x^2-4x+3<0$의 해는?",
+      "choicesLatex": ["x < 1 \\text{ 또는 } x > 3", "1 < x < 3", "..."],
+      "status": "pending"
+    }
+  ],
+  "preparingCount": 1
+}
+```
+
+- `level`: -1 · 0 · 1 / `format`: `mc5`(5지선다) · `short`(1~999 자연수) / `status`: `pending` · `answered` · `expired`
+- `passage`: 문제가 기대는 지문 (2026-10-25 추가). 수학이 아닌 과목은 **같은 지문에 다른 문제**를 내므로, 지문이 있으면 문제 위에 보여 줘야 풀 수 있습니다. 없으면 `null`.
+- 수학이 아닌 과목(국어 · 영어 · 사회 · 과학)은 형식이 `mc5` 뿐이고 `choicesLatex` 에 **선지 글이 그대로** 들어갑니다. `$…$` 부분만 수식으로 그리면 됩니다.
+- 하루 10문항까지. 넘친 항목은 다음 날로 넘어갑니다. 아직 오지 않은 날을 부르면 400.
+
+#### 답 내기
+
+`POST /api/v1/variant/assignments/{id}/attempts` — 본문 `{ "answer": "1", "timeSpentSec": 95 }`. `mc5` 는 선지 번호 `"0"` ~ `"4"`, `short` 는 정수 글자. **과제당 한 번만** 답할 수 있습니다.
+
+```json
+{
+  "isCorrect": false,
+  "correctAnswer": "1",
+  "correctAnswerLatex": "1 < x < 3",
+  "solution": "$(x-1)(x-3)<0$이므로 $1<x<3$이다.",
+  "chosenDistractorRationale": "부등호 방향을 반대로 읽음",
+  "reviewItem": { "id": "7", "status": "active", "currentLevel": 0 }
+}
+```
+
+- `chosenDistractorRationale`: 고른 오답 선지가 어떤 실수인지 (맞았거나 `short` 면 `null`)
+- `reviewItem`: 이 답으로 바뀐 학습 항목. L0 정답 → L1, L1 정답 → 졸업(`graduated`), L0 두 번 연속 오답 → L-1 …
+
+#### 주간 심화 세트
+
+`GET /api/v1/variant/weekly?week=2026-10-19&includeAnswers=false` — 매주 월요일에 만든 **지난주(월 ~ 일)** 세트. `week` 는 돌아보는 주의 **월요일**이고, 빼면 가장 최근 세트입니다. `(A)` 맞은 문제의 대표 유형 심화 + `(B)` 졸업한 오답의 심화. 마감은 만든 날 + 7일.
+
+```json
+{
+  "weekStart": "2026-10-19",
+  "dueDate": "2026-11-02",
+  "items": [
+    {
+      "number": 1,
+      "assignmentId": "30",
+      "source": "a",
+      "format": "short",
+      "passage": null,
+      "problemText": "...",
+      "choicesLatex": [],
+      "status": "pending",
+      "answerKey": null
+    }
+  ]
+}
+```
+
+- `includeAnswers=true` 여도 **이미 답했거나 마감된 문항만** `answerKey`(`correctAnswer` · `correctAnswerLatex` · `solution`)가 채워집니다. (PDF 정답지용)
+- `passage` 는 일일 과제와 같습니다. (A) 의 "유형" 은 수학이면 유형 코드, 수학이 아닌 과목이면 성취기준 코드입니다.
+- 그 주 세트가 없으면 404, `week` 가 날짜가 아니거나 월요일이 아니면 400.
+
+#### 오답노트 현황
+
+`GET /api/v1/variant/review-items?status=active` — `status` 는 `active` · `graduated` · `mastered` (빼면 전부). 한 줄: `id`, `sourceProblemId`, `problemText`, `unitCode` · `unitName`, `typeCode` · `typeName`, `status`, `origin`(`daily_wrong` · `weekly_correct_fail`), `currentLevel`, `needsAttention`(L-1 에서도 3번 이상 틀림), `nextDueDate`.
+
+#### 에러
+
+| 상태 | `code`             | 언제                                                                                              |
+| ---- | ------------------ | ------------------------------------------------------------------------------------------------- |
+| 400  | `VALIDATION_ERROR` | 필수 칸이 없음 · 글자 수 초과 · 분류체계에 없는 코드 · 답의 모양이 틀림 · 미래 날짜 · `week` 모양 |
+| 401  | `UNAUTHORIZED`     | 로그인하지 않음                                                                                   |
+| 404  | `NOT_FOUND`        | 없는 과제 · 원본 · 주간 세트, **또는 남의 것**                                                    |
+| 409  | `CONFLICT`         | 이미 답한 과제 · 마감이 지난 과제 · 분류를 정할 수 없는 상태의 원본                               |
+
 ### 예약 작업 실행
 
 `POST /api/v1/jobs/{name}` — 예약 작업을 한 번 실행. 정해진 시각에 스케줄러(cron-job.org)가 부릅니다. (이슈 #9, 자세한 설명은 [JOBS.md](./JOBS.md))
@@ -6206,7 +6379,7 @@ FE 는 이 한 줄을 종료 팝업의 증빙 요약 칸에 넣고, 학생이 �
 
 - `/api/v1/jobs/` 아래의 **모든 주소**가 같은 규칙으로 보호됩니다. (앞으로 작업 주소가 늘어나도 자동)
 - 서버에 키가 설정되지 않았으면 **모든 요청을 거절**합니다. (`401`)
-- 지금 있는 작업 이름: `practice` (연습 작업 — 서버 로그에 한 줄을 남김)
+- 지금 있는 작업 이름: `practice` (연습 작업 — 서버 로그에 한 줄을 남김), 변형 문제의 `variant-expire` · `variant-daily` · `variant-weekly` (JOBS.md 6-12)
 
 **응답 200** — 작업을 실행했거나, 같은 작업이 이미 실행 중이라 건너뜀
 
