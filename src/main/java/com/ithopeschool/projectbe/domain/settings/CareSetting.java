@@ -20,6 +20,9 @@ import lombok.NoArgsConstructor;
 // 제재 한도(maxCareLevel)는 낮추면 바로, 높이면 다음 날부터 적용됩니다. (기획서 v2 5장 「원칙」)
 //   오늘 10/17 에 2 → 4 로 올리면:  maxCareLevel 2, pendingMaxCareLevel 4, pendingEffectiveDate 10/18
 //   10/18 이 되면 maxCareLevelOn(10/18) 이 4 를 돌려줍니다.
+// 말투 수위(maxHarshness)도 똑같습니다. 바뀔 수위는 pendingMaxHarshness · pendingHarshnessEffectiveDate 에 적습니다.
+// (이슈 #227)
+// 한도와 수위는 날짜 칸을 따로 둡니다. 둘을 다른 날 올려도 서로의 적용 날짜가 섞이지 않게 하려고요.
 //
 // 값의 범위는 Service 와 요청 검사에서 먼저 막고, 혹시 빠뜨려도 DB 가 한 번 더 막도록 검사 규칙(check)도 걸어 두었습니다.
 // (제재 한도 0 ~ 4 는 CareLevel.MIN_LEVEL · MAX_LEVEL 과 같습니다. 그쪽 범위가 바뀌면 아래 check 도 고쳐 주세요)
@@ -39,7 +42,10 @@ import lombok.NoArgsConstructor;
           constraint = "max_care_level between 0 and 4"),
       @CheckConstraint(
           name = "ck_care_settings_pending_max_care_level",
-          constraint = "pending_max_care_level is null or pending_max_care_level between 0 and 4")
+          constraint = "pending_max_care_level is null or pending_max_care_level between 0 and 4"),
+      @CheckConstraint(
+          name = "ck_care_settings_pending_max_harshness",
+          constraint = "pending_max_harshness is null or pending_max_harshness between 1 and 5")
     })
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
@@ -49,8 +55,9 @@ public class CareSetting {
   // 바꿀 때는 FE(src/lib/messageSettings.ts · careLimits.ts)도 같이 바꿔야 화면과 서버가 어긋나지 않습니다.
   public static final LocalTime DEFAULT_CALL_TIME = LocalTime.of(21, 0);
   public static final int DEFAULT_DAILY_MESSAGE_COUNT = 3;
-  public static final int DEFAULT_MAX_HARSHNESS = 3;
-  public static final int DEFAULT_MAX_CARE_LEVEL = 2;
+  // 제재 한도 3, 말투 수위 2 (기획서 6.3 표의 기본값, 이슈 #227 에서 2/3 → 3/2 로 바꿈)
+  public static final int DEFAULT_MAX_HARSHNESS = 2;
+  public static final int DEFAULT_MAX_CARE_LEVEL = 3;
   public static final boolean DEFAULT_ALLOW_APP_LOCK = false;
 
   // 값의 범위
@@ -102,6 +109,12 @@ public class CareSetting {
   // 바뀔 한도가 적용되는 날짜. 없으면 비어 있습니다.
   private LocalDate pendingEffectiveDate;
 
+  // 말투 수위를 올렸는데 아직 적용 전이면, 바뀔 수위. 없으면 비어 있습니다.
+  private Integer pendingMaxHarshness;
+
+  // 바뀔 수위가 적용되는 날짜. 없으면 비어 있습니다.
+  private LocalDate pendingHarshnessEffectiveDate;
+
   public CareSetting(
       Long userId,
       LocalTime callTime,
@@ -151,11 +164,15 @@ public class CareSetting {
     return pendingMaxCareLevel != null ? pendingMaxCareLevel : maxCareLevel;
   }
 
-  // 적용 날짜가 된 바뀔 한도를 지금 한도로 옮깁니다.
+  // 적용 날짜가 된 바뀔 한도 · 바뀔 수위를 지금 값으로 옮깁니다.
   public void applyDuePending(LocalDate today) {
     if (isPendingDue(today)) {
       maxCareLevel = pendingMaxCareLevel;
       clearPending();
+    }
+    if (isHarshnessPendingDue(today)) {
+      maxHarshness = pendingMaxHarshness;
+      clearPendingHarshness();
     }
   }
 
@@ -189,8 +206,33 @@ public class CareSetting {
     this.quietEnd = quietEnd;
   }
 
-  public void changeMaxHarshness(int maxHarshness) {
-    this.maxHarshness = maxHarshness;
+  // 그날(today) 적용되는 말투 수위입니다.
+  public int maxHarshnessOn(LocalDate today) {
+    return isHarshnessPendingDue(today) ? pendingMaxHarshness : maxHarshness;
+  }
+
+  // 그날(today) 기준으로 아직 적용 전인 바뀔 수위가 있으면 true 입니다.
+  public boolean hasPendingHarshnessOn(LocalDate today) {
+    return pendingMaxHarshness != null && !isHarshnessPendingDue(today);
+  }
+
+  // 사용자가 마지막으로 고른 수위입니다. (바뀔 수위가 있으면 그것, 없으면 지금 수위)
+  public int requestedMaxHarshness() {
+    return pendingMaxHarshness != null ? pendingMaxHarshness : maxHarshness;
+  }
+
+  // 말투 수위를 바꿉니다. 제재 한도(changeMaxCareLevel)와 같은 규칙입니다.
+  // - 낮추거나 지금과 같으면: 바로 적용하고, 기다리던 바뀔 수위는 지웁니다.
+  // - 높이면: 바로 바꾸지 않고, 다음 날부터 적용되게 적어 둡니다.
+  public void changeMaxHarshness(int requested, LocalDate today) {
+    applyDuePending(today);
+    if (requested <= maxHarshness) {
+      maxHarshness = requested;
+      clearPendingHarshness();
+    } else {
+      pendingMaxHarshness = requested;
+      pendingHarshnessEffectiveDate = today.plusDays(1);
+    }
   }
 
   public void changeAllowAppLock(boolean allowAppLock) {
@@ -205,5 +247,15 @@ public class CareSetting {
   private void clearPending() {
     pendingMaxCareLevel = null;
     pendingEffectiveDate = null;
+  }
+
+  // 바뀔 수위가 있고, 적용 날짜가 오늘이거나 지났으면 true
+  private boolean isHarshnessPendingDue(LocalDate today) {
+    return pendingMaxHarshness != null && !today.isBefore(pendingHarshnessEffectiveDate);
+  }
+
+  private void clearPendingHarshness() {
+    pendingMaxHarshness = null;
+    pendingHarshnessEffectiveDate = null;
   }
 }

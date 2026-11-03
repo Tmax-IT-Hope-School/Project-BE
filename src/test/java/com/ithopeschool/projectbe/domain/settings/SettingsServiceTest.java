@@ -41,6 +41,7 @@ class SettingsServiceTest {
   private CareSettingRepository careSettingRepository;
   private FocusLockAppRepository focusLockAppRepository;
   private SettingChangeRepository settingChangeRepository;
+  private SettingSourceRepository settingSourceRepository;
   private SettingsService settingsService;
 
   @BeforeEach
@@ -49,12 +50,14 @@ class SettingsServiceTest {
     careSettingRepository = mock(CareSettingRepository.class);
     focusLockAppRepository = mock(FocusLockAppRepository.class);
     settingChangeRepository = mock(SettingChangeRepository.class);
+    settingSourceRepository = mock(SettingSourceRepository.class);
     settingsService =
         new SettingsService(
             currentUserProvider,
             careSettingRepository,
             focusLockAppRepository,
             settingChangeRepository,
+            settingSourceRepository,
             Clock.fixed(NOW, ZoneOffset.UTC));
     given(currentUserProvider.getCurrentUserId()).willReturn(ME);
     given(careSettingRepository.findByUserId(any())).willReturn(Optional.empty());
@@ -127,7 +130,11 @@ class SettingsServiceTest {
 
     assertError(() -> settingsService.getSettings(), ErrorCode.UNAUTHORIZED, "로그인이 필요해요");
     assertError(() -> settingsService.update(harshness(5)), ErrorCode.UNAUTHORIZED, "로그인이 필요해요");
-    verifyNoInteractions(careSettingRepository, focusLockAppRepository, settingChangeRepository);
+    verifyNoInteractions(
+        careSettingRepository,
+        focusLockAppRepository,
+        settingChangeRepository,
+        settingSourceRepository);
   }
 
   // ---- 보기 ----
@@ -137,9 +144,29 @@ class SettingsServiceTest {
   void getDefaults() {
     SettingsResponse response = settingsService.getSettings();
 
+    // 기본값: 말투 수위 2, 제재 한도 3 (이슈 #227)
     assertThat(response)
-        .isEqualTo(
-            new SettingsResponse("21:00", 3, "23:00", "07:00", 3, false, 2, null, null, List.of()));
+        .extracting(
+            SettingsResponse::callTime,
+            SettingsResponse::dailyCount,
+            SettingsResponse::quietStart,
+            SettingsResponse::quietEnd,
+            SettingsResponse::maxHarshness,
+            SettingsResponse::allowFocusMode,
+            SettingsResponse::maxCareLevel,
+            SettingsResponse::pendingMaxCareLevel,
+            SettingsResponse::pendingMaxHarshness,
+            SettingsResponse::lockApps)
+        .containsExactly("21:00", 3, "23:00", "07:00", 2, false, 3, null, null, List.of());
+    // 아무도 정하지 않은 칸은 근거가 비어 있고 잠기지 않았다
+    assertThat(response.sources()).containsOnlyKeys(SettingsResponse.FIELDS);
+    assertThat(response.sources().values())
+        .allSatisfy(
+            info -> {
+              assertThat(info.source()).isNull();
+              assertThat(info.reason()).isNull();
+              assertThat(info.locked()).isFalse();
+            });
     verify(careSettingRepository).findByUserId(ME);
     verify(careSettingRepository, never()).save(any());
   }
@@ -148,13 +175,13 @@ class SettingsServiceTest {
   @DisplayName("내 설정과 잠금 대상 앱을 내 번호로 찾아 보여 준다")
   void getMySettings() {
     CareSetting setting = givenMySetting();
-    setting.changeMaxHarshness(5);
+    setting.changeMaxHarshness(1, OCT_17);
     given(focusLockAppRepository.findByUserIdOrderById(ME))
         .willReturn(List.of(new FocusLockApp(ME, "유튜브")));
 
     SettingsResponse response = settingsService.getSettings();
 
-    assertThat(response.maxHarshness()).isEqualTo(5);
+    assertThat(response.maxHarshness()).isEqualTo(1);
     assertThat(response.lockApps()).containsExactly("유튜브");
     verify(focusLockAppRepository).findByUserIdOrderById(ME);
   }
@@ -167,7 +194,7 @@ class SettingsServiceTest {
 
     SettingsResponse response = settingsService.getSettings();
 
-    assertThat(response.maxCareLevel()).isEqualTo(2);
+    assertThat(response.maxCareLevel()).isEqualTo(3);
     assertThat(response.pendingMaxCareLevel()).isEqualTo(4);
     assertThat(response.pendingEffectiveDate()).isEqualTo(OCT_18);
   }
@@ -194,19 +221,23 @@ class SettingsServiceTest {
         () -> settingsService.update(request(null, null, null, null, null, null, null, null)),
         ErrorCode.VALIDATION_ERROR,
         "바꿀 값을 보내 주세요");
-    verifyNoInteractions(careSettingRepository, focusLockAppRepository, settingChangeRepository);
+    verifyNoInteractions(
+        careSettingRepository,
+        focusLockAppRepository,
+        settingChangeRepository,
+        settingSourceRepository);
   }
 
   @Test
   @DisplayName("처음 바꾸면 처음 값으로 설정 줄을 만든 뒤 바꾼다")
   void firstUpdateCreatesRow() {
-    SettingsResponse response = settingsService.update(harshness(5));
+    SettingsResponse response = settingsService.update(harshness(1));
 
     ArgumentCaptor<CareSetting> saved = ArgumentCaptor.forClass(CareSetting.class);
     verify(careSettingRepository).save(saved.capture());
     assertThat(saved.getValue().getUserId()).isEqualTo(ME);
-    assertThat(saved.getValue().getMaxHarshness()).isEqualTo(5);
-    assertThat(response.maxHarshness()).isEqualTo(5);
+    assertThat(saved.getValue().getMaxHarshness()).isEqualTo(1);
+    assertThat(response.maxHarshness()).isEqualTo(1);
   }
 
   @Test
@@ -214,10 +245,10 @@ class SettingsServiceTest {
   void updateExistingRow() {
     CareSetting setting = givenMySetting();
 
-    settingsService.update(harshness(5));
+    settingsService.update(harshness(1));
 
     verify(careSettingRepository, never()).save(any());
-    assertThat(setting.getMaxHarshness()).isEqualTo(5);
+    assertThat(setting.getMaxHarshness()).isEqualTo(1);
   }
 
   @Test
@@ -225,16 +256,16 @@ class SettingsServiceTest {
   void updateRecordsEachChange() {
     CareSetting setting = givenMySetting();
 
-    settingsService.update(request("20:30", 0, "22:00", "06:30", 5, true, null, null));
+    settingsService.update(request("20:30", 0, "22:00", "06:30", 1, true, null, null));
 
     assertThat(setting.getCallTime()).isEqualTo(LocalTime.of(20, 30));
     assertThat(setting.getDailyMessageCount()).isEqualTo(0);
     assertThat(setting.getQuietStart()).isEqualTo(LocalTime.of(22, 0));
     assertThat(setting.getQuietEnd()).isEqualTo(LocalTime.of(6, 30));
-    assertThat(setting.getMaxHarshness()).isEqualTo(5);
+    assertThat(setting.getMaxHarshness()).isEqualTo(1);
     assertThat(setting.isAllowAppLock()).isTrue();
     // 보내지 않은 한도는 그대로
-    assertThat(setting.getMaxCareLevel()).isEqualTo(2);
+    assertThat(setting.getMaxCareLevel()).isEqualTo(3);
 
     assertThat(savedChanges())
         .extracting(
@@ -248,7 +279,7 @@ class SettingsServiceTest {
             tuple(ME, NOW, "dailyCount", "3", "0"),
             tuple(ME, NOW, "quietStart", "23:00", "22:00"),
             tuple(ME, NOW, "quietEnd", "07:00", "06:30"),
-            tuple(ME, NOW, "maxHarshness", "3", "5"),
+            tuple(ME, NOW, "maxHarshness", "2", "1"),
             tuple(ME, NOW, "allowFocusMode", "false", "true"));
   }
 
@@ -257,25 +288,25 @@ class SettingsServiceTest {
   void sameValueIsNotRecorded() {
     givenMySetting();
 
-    settingsService.update(request("21:00", 3, null, null, 3, false, 2, null));
+    settingsService.update(request("21:00", 3, null, null, 2, false, 3, null));
 
     assertThat(savedChanges()).isEmpty();
   }
 
   @Test
-  @DisplayName("한도를 높이면 오늘은 그대로 2 이고 내일(10/18)부터 4 다. 기록에는 2 → 4 가 남는다")
+  @DisplayName("한도를 높이면 오늘은 그대로 3 이고 내일(10/18)부터 4 다. 기록에는 3 → 4 가 남는다")
   void raiseCareLevel() {
     CareSetting setting = givenMySetting();
 
     SettingsResponse response = settingsService.update(careLevel(4));
 
-    assertThat(response.maxCareLevel()).isEqualTo(2);
+    assertThat(response.maxCareLevel()).isEqualTo(3);
     assertThat(response.pendingMaxCareLevel()).isEqualTo(4);
     assertThat(response.pendingEffectiveDate()).isEqualTo(OCT_18);
     assertThat(setting.maxCareLevelOn(OCT_18)).isEqualTo(4);
     assertThat(savedChanges())
         .extracting(SettingChange::getField, SettingChange::getOldValue, SettingChange::getNewValue)
-        .containsExactly(tuple("maxCareLevel", "2", "4"));
+        .containsExactly(tuple("maxCareLevel", "3", "4"));
   }
 
   @Test
@@ -287,6 +318,47 @@ class SettingsServiceTest {
 
     assertThat(response.maxCareLevel()).isEqualTo(0);
     assertThat(response.pendingMaxCareLevel()).isNull();
+  }
+
+  @Test
+  @DisplayName("말투 수위를 높이면 오늘은 그대로 2 이고 내일(10/18)부터 4 다. 기록에는 2 → 4 가 남는다")
+  void raiseHarshness() {
+    CareSetting setting = givenMySetting();
+
+    SettingsResponse response = settingsService.update(harshness(4));
+
+    assertThat(response.maxHarshness()).isEqualTo(2);
+    assertThat(response.pendingMaxHarshness()).isEqualTo(4);
+    assertThat(response.pendingHarshnessEffectiveDate()).isEqualTo(OCT_18);
+    assertThat(setting.maxHarshnessOn(OCT_17)).isEqualTo(2);
+    assertThat(setting.maxHarshnessOn(OCT_18)).isEqualTo(4);
+    assertThat(savedChanges())
+        .extracting(SettingChange::getField, SettingChange::getOldValue, SettingChange::getNewValue)
+        .containsExactly(tuple("maxHarshness", "2", "4"));
+  }
+
+  @Test
+  @DisplayName("말투 수위를 낮추면 바로 적용된다")
+  void lowerHarshness() {
+    givenMySetting();
+
+    SettingsResponse response = settingsService.update(harshness(1));
+
+    assertThat(response.maxHarshness()).isEqualTo(1);
+    assertThat(response.pendingMaxHarshness()).isNull();
+    assertThat(response.pendingHarshnessEffectiveDate()).isNull();
+  }
+
+  @Test
+  @DisplayName("어제 올린 말투 수위는 오늘 보기에서 지금 수위로 보인다")
+  void getShowsAppliedHarshnessRaise() {
+    CareSetting setting = givenMySetting();
+    setting.changeMaxHarshness(5, OCT_17.minusDays(1));
+
+    SettingsResponse response = settingsService.getSettings();
+
+    assertThat(response.maxHarshness()).isEqualTo(5);
+    assertThat(response.pendingMaxHarshness()).isNull();
   }
 
   @Test
@@ -350,7 +422,7 @@ class SettingsServiceTest {
                 request(null, null, null, null, 5, null, null, List.of("유튜브", "유튜브"))),
         ErrorCode.VALIDATION_ERROR,
         "같은 앱이 두 번 들어 있어요");
-    assertThat(setting.getMaxHarshness()).isEqualTo(3);
+    assertThat(setting.getMaxHarshness()).isEqualTo(2);
     verify(focusLockAppRepository, never()).deleteAllOfUser(any());
     verifyNoInteractions(settingChangeRepository);
   }

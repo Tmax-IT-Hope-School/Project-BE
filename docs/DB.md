@@ -85,6 +85,7 @@ erDiagram
     users ||--o| care_settings : "user_id"
     users ||--o{ focus_lock_apps : "user_id"
     users ||--o{ setting_changes : "user_id"
+    users ||--o{ setting_sources : "user_id"
     users ||--o{ gpt_usages : "user_id"
     call_records ||--o| gpt_usages : "call_record_id"
     users ||--o{ insights : "user_id"
@@ -453,6 +454,8 @@ erDiagram
         int max_care_level "지금 적용 중인 제재 한도 (0 ~ 4)"
         int pending_max_care_level "올렸는데 아직 적용 전인 한도 (없으면 비어 있음)"
         date pending_effective_date "바뀔 한도가 적용되는 날짜 (없으면 비어 있음)"
+        int pending_max_harshness "올렸는데 아직 적용 전인 말투 수위 (없으면 비어 있음)"
+        date pending_harshness_effective_date "바뀔 수위가 적용되는 날짜 (없으면 비어 있음)"
     }
     focus_lock_apps {
         bigint id PK "한 줄을 구분하는 고유 번호"
@@ -466,6 +469,15 @@ erDiagram
         varchar field "바꾼 칸의 이름 (API 의 JSON 이름, 예: maxHarshness)"
         varchar old_value "바꾸기 전 값 (글자, 1000자까지)"
         varchar new_value "바꾼 뒤 값 (글자, 1000자까지)"
+        varchar source "누가 바꿨는지 (TEST / DATA / USER)"
+    }
+    setting_sources {
+        bigint id PK "한 줄을 구분하는 고유 번호"
+        bigint user_id FK "이 근거의 주인"
+        varchar field "설정 칸 이름 (API 의 JSON 이름, 같은 사용자 안에서 중복 불가)"
+        varchar source "누가 정했는지 (TEST / DATA / USER)"
+        varchar reason "왜 이 값인지 한 줄 (100자까지)"
+        boolean locked "잠겼으면 true. 사용자가 정한 칸은 AI 가 다시 바꾸지 않음"
     }
     school_events {
         bigint id PK "일정 한 줄을 구분하는 고유 번호"
@@ -763,6 +775,7 @@ erDiagram
 | 회고 #17 | 완료 | `reviews` |
 | 온보딩 #21 | 완료 | `onboarding_answers`와 선택 항목, `initial_plans` |
 | 관리 설정 #22 | 완료 | `care_settings`, `focus_lock_apps`, `setting_changes` |
+| 설정 v3 #227 | 진행 중 (근거·잠금) | `setting_sources`, `care_settings`·`setting_changes` 에 칸 추가 |
 | 체크인 #24 | 완료 | `checkins` |
 | 통화 요약 #29 | 완료 | `call_records` |
 | AI 메시지 #30 | 완료 | `messages` |
@@ -824,7 +837,8 @@ erDiagram
 | `reviews` | 회고 하나가 한 줄 (시험 후 회고 또는 주간 회고, 답 3개). 같은 시험·같은 주에 다시 쓰면 덮어씀 | #17 |
 | `care_settings` | 사용자 한 명의 관리 설정이 한 줄 (전화 시간, 메시지 횟수, 연락 금지, 독설 수위, 앱 잠금, 제재 한도와 바뀔 한도) | #22 |
 | `focus_lock_apps` | 한 사용자가 고른 잠금 대상 앱 하나가 한 줄. 같은 사용자 안에서 같은 앱은 한 번만 | #22 |
-| `setting_changes` | 설정 칸 하나를 한 번 바꾼 것이 한 줄 (바꾼 시각, 칸 이름, 이전 값, 새 값) | #22 |
+| `setting_changes` | 설정 칸 하나를 한 번 바꾼 것이 한 줄 (바꾼 시각, 칸 이름, 이전 값, 새 값, 누가 바꿨나) | #22 · #227 |
+| `setting_sources` | 사용자 한 명의 설정 칸 하나의 근거가 한 줄 (누가 정했나 TEST/DATA/USER, 이유 한 줄, 잠금). 아무도 안 정한 칸은 줄이 없음 | #227 |
 | `school_events` | 학교 하나의 학사일정 하루치 행사가 한 줄 (날짜, 이름, 설명, 학년). **사람이 아니라 학교마다 한 벌**이고 NEIS 에서 받을 때마다 그 기간을 통째로 바꿈 | #282 |
 | `school_event_fetches` | 학교 하나가 한 줄 (교육청 코드, NEIS 에서 마지막으로 받은 시각). 다시 받을지 정할 때 봄 | #282 |
 | `gpt_usages` | GPT 를 한 번 부른 것이 한 줄 (종류, 부른 시각, 통화 번호·통화 시간, 대략적인 비용). 얼마나 썼는지 보는 기록 (하루 한도는 2026-10-24 에 없앰) | #33 |
@@ -902,6 +916,12 @@ erDiagram
 > - **제재 한도는 "지금 한도" 와 "바뀔 한도 · 적용 날짜" 를 따로 적습니다.** 높이면 다음 날부터 적용해야 해서, 오늘 값과 내일 값을 둘 다 기억해야 하기 때문입니다. 이 두 칸만 비어도 됩니다.
 > - **잠금 대상 앱은 여러 개라서 딸린 테이블**로 뺐습니다. (시험 점수와 같은 이유)
 > - **바꾼 기록은 칸 하나를 바꿀 때마다 한 줄**입니다. 값의 모양이 제각각이라 이전 값 · 새 값은 글자로 적습니다. 설정 표는 값을 덮어써서, 옛 값은 여기에만 남습니다.
+
+> `setting_sources` 와 칸 추가는 2026-10-24 에 이슈 #227 에서 **학생이 직접 정한** 모양입니다. (AI 는 질문으로 돕고 정한 것을 코드로 옮겼습니다)
+> - **한 줄 = 칸 하나의 근거.** 값은 그대로 `care_settings` 에 두고, "누가·왜·잠겼나" 만 따로 적습니다. 칸이 늘어나도 이 표 모양은 바뀌지 않습니다.
+> - **아무도 정하지 않은 칸은 줄이 없습니다.** 그때 API 의 `source` 는 `null` 입니다. 사용자가 정하면 이유는 늘 "내가 정했어요" 입니다.
+> - **말투 수위도 제재 한도처럼 "바뀔 수위 · 적용 날짜" 를 따로 적습니다.** 날짜 칸을 한도와 같이 쓰지 않은 것은, 둘을 다른 날 올렸을 때 날짜가 섞이지 않게 하려고입니다.
+> - **바꾼 기록에 `source` (누가 바꿨나)** 를 더했습니다. 이 칸이 생기기 전의 기록은 모두 사용자가 바꾼 것이라 `USER` 로 채웠습니다.
 > - 세 테이블 모두 `user_id` 가 있어서 탈퇴하면 같이 지워집니다.
 > - 처음 값은 FE 와 같습니다 (전화 시간 21:00 은 학생이 정함). FE 의 `allowOffHoursCall`(정해진 시간 외 독촉 전화 허용)은 이슈에 없어서 담지 않았습니다.
 
